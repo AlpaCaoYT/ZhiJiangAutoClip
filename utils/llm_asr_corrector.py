@@ -87,7 +87,7 @@ def correct_srt_with_llm(srt_path, output_path=None):
     print(f"  已解析 {len(entries)} 条字幕，开始 LLM 智能纠错...")
 
     # 分批次处理（每批最多 30 条，避免 token 超限）
-    BATCH_SIZE = 30
+    BATCH_SIZE = 60
     corrected_entries = []
 
     for batch_start in range(0, len(entries), BATCH_SIZE):

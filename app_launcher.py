@@ -1497,14 +1497,7 @@ class AppLauncher(TkinterDnD.Tk):
                         elif num == 2:
                             from utils.ASRCorrector import FileBasedCorrector
                             FileBasedCorrector().process_folder(self.input_dir_var.get().strip())
-                            # 字典纠错后自动跑 LLM 智能纠错（有 API Key 时）
-                            if self.api_key_var.get().strip():
-                                try:
-                                    from utils.llm_asr_corrector import llm_correct_folder
-                                    self.log("  自动运行 LLM 智能纠错...")
-                                    llm_correct_folder(self.input_dir_var.get().strip())
-                                except Exception as e:
-                                    self.log(f"  LLM 纠错跳过: {e}")
+                            # LLM 智能纠错改为手动触发（高级配置按钮），自动流程太慢
                         elif num == 3:
                             from danmu_method.get_data_by_danmu import DanmakuAnalyzer
                             analyzer = DanmakuAnalyzer()
