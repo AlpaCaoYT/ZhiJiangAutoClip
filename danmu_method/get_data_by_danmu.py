@@ -608,6 +608,10 @@ class DanmakuAnalyzer:
         
         results = []
         for i, h in enumerate(highlights, 1):
+            # 检查终止标志（由 GUI 设置）
+            if os.environ.get("AUTOCLIP_STOP") == "1":
+                print(f"\n⏹ 用户终止，已分析 {i-1}/{len(highlights)} 个片段")
+                break
             duration = h['end'] - h['start']
 
             print(f"\n[{i}/{len(highlights)}] 分析片段中...")

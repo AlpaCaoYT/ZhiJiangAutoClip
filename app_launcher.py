@@ -901,22 +901,22 @@ class AppLauncher(TkinterDnD.Tk):
         return Path(self._video_list[0][0]) if self._video_list else None
 
     def _get_selected_srt(self):
-        """返回用户选择的 SRT 文件路径（未匹配时返回 None）"""
+        """返回用户选择的 SRT 文件（无有效匹配时返回None）"""
         sel = self._srt_var.get()
-        if "未匹配" in sel or "无字幕" in sel or "自动生成" in sel:
+        if any(x in sel for x in ("未匹配", "无字幕", "自动生成", "BV下载", "未检测到")):
             return None
         for path, display in self._srt_list:
-            if display == sel:
+            if display == sel and os.path.exists(path):
                 return Path(path)
         return None
 
     def _get_selected_ass(self):
-        """返回用户选择的 ASS 弹幕文件路径（未匹配时返回 None）"""
+        """返回用户选择的 ASS 弹幕文件（无有效匹配时返回None）"""
         sel = self._ass_var.get()
-        if "未匹配" in sel or "无弹幕" in sel or "自动跳过" in sel:
+        if any(x in sel for x in ("未匹配", "无弹幕", "自动跳过", "BV下载", "未检测到")):
             return None
         for path, display in self._ass_list:
-            if display == sel:
+            if display == sel and os.path.exists(path):
                 return Path(path)
         return None
 
@@ -1281,6 +1281,7 @@ class AppLauncher(TkinterDnD.Tk):
     def _stop_run(self):
         """用户点击终止按钮"""
         self._stop_requested = True
+        os.environ["AUTOCLIP_STOP"] = "1"  # 跨线程传递终止信号
         self.btn_stop.configure(state="disabled", text="终止中...")
         self.log("[用户] 请求终止，当前步骤完成后将停止...")
 
@@ -1785,6 +1786,7 @@ class AppLauncher(TkinterDnD.Tk):
             self._apply_env()
             self._reset_steps()
             self._stop_requested = False
+            os.environ["AUTOCLIP_STOP"] = "0"
 
             is_bv = self._mode.get() == "bv"
 
