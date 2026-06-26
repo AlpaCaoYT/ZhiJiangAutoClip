@@ -74,26 +74,33 @@ class BcutASR:
         os.unlink(tmp_path)
         return data
 
-    def transcribe(self, max_retries=1) -> str:
-        """执行语音识别，返回 SRT 格式字幕文本（含重试）"""
-        last_error = None
-        for attempt in range(max_retries):
-            try:
-                print(f"  必剪 ASR 识别中... (尝试 {attempt + 1}/{max_retries})")
-                audio = self._extract_audio()
-                self._request_upload(audio)
-                self._upload_parts(audio)
-                self._commit_upload()
-                self._create_task()
-                result = self._query_result()
-                return self._build_srt(result)
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries - 1:
-                    wait = (attempt + 1) * 3
-                    print(f"  暂失败: {e}，{wait}秒后重试...")
-                    time.sleep(wait)
-        raise RuntimeError(f"必剪 ASR 不可用 (B站接口可能需登录): {last_error}")
+    def transcribe(self, max_retries=0) -> str:
+        """执行语音识别（先测API，失败立即换方案）"""
+        # 快速探测 API 可用性
+        try:
+            resp = requests.post(
+                f"{API_BASE}/resource/create",
+                json={"type": 2, "name": "test.mp3", "size": 1,
+                      "ResourceFileType": "mp3", "model_id": "8"},
+                headers=_make_headers(), timeout=10,
+            )
+            resp_json = resp.json()
+            if "data" not in resp_json:
+                code = resp_json.get("code", "?")
+                msg = resp_json.get("msg", resp_json.get("message", str(resp_json)[:100]))
+                raise RuntimeError(f"B站API拒绝 (code={code}): {msg}")
+        except Exception as e:
+            raise RuntimeError(f"必剪不可用: {e}")
+
+        # API 可达，开始识别
+        print("  必剪 ASR 识别中...")
+        audio = self._extract_audio()
+        self._request_upload(audio)
+        self._upload_parts(audio)
+        self._commit_upload()
+        self._create_task()
+        result = self._query_result()
+        return self._build_srt(result)
 
     def _request_upload(self, audio: bytes):
         resp = requests.post(

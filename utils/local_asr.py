@@ -150,13 +150,12 @@ def transcribe_local(video_path, output_dir=None, model_size="small"):
 
 def auto_generate_srt_robust(video_path, output_dir=None):
     """三级回退: 必剪(云端秒级) → faster-whisper GPU → WhisperAPI"""
-    # [1] 必剪 (B站云端秒级，最快)
+    # [1] 必剪 (B站云端，先快速探测API)
     try:
-        print("  [1/3] 必剪 Bcut ASR...")
         from utils.bcut_asr import video_to_srt
         return video_to_srt(video_path, output_dir)
-    except Exception as e:
-        print(f"  必剪不可用: {e}")
+    except Exception:
+        print("  必剪已失效，切换 whisper GPU...")
 
     # [2] faster-whisper large-v3 GPU（本地，已就绪）
     try:
