@@ -1,5 +1,16 @@
 import os
 import sys
+
+# === GPU CUDA DLL 路径注入（必须在任何 CUDA 库加载前执行）===
+_py_base = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
+if _py_base.exists():
+    for _d in _py_base.rglob("bin"):
+        try:
+            os.add_dll_directory(str(_d))
+        except Exception:
+            pass
+# ================================================================
+
 import io
 import json
 import time

@@ -93,7 +93,7 @@ class BcutASR:
                     wait = (attempt + 1) * 3
                     print(f"  暂失败: {e}，{wait}秒后重试...")
                     time.sleep(wait)
-        raise RuntimeError(f"必剪 ASR 识别失败（重试{max_retries}次）: {last_error}")
+        raise RuntimeError(f"必剪 ASR 不可用 (B站接口可能需登录): {last_error}")
 
     def _request_upload(self, audio: bytes):
         resp = requests.post(
@@ -111,7 +111,9 @@ class BcutASR:
         resp.raise_for_status()
         resp_json = resp.json()
         if "data" not in resp_json:
-            raise RuntimeError(f"B站API返回异常 (缺少data字段): {str(resp_json)[:200]}")
+            code = resp_json.get("code", "?")
+            msg = resp_json.get("msg", resp_json.get("message", str(resp_json)[:150]))
+            raise RuntimeError(f"B站API拒绝 (code={code}): {msg}")
         data = resp_json["data"]
         self._resource_id = data["resource_id"]
         self._upload_id = data["upload_id"]

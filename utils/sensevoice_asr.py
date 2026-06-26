@@ -65,7 +65,7 @@ def transcribe_sensevoice(video_path, output_dir=None):
     except ImportError as e:
         raise RuntimeError(
             f"funasr 依赖缺失 ({e})。需要 VS Build Tools 编译 editdistance。\n"
-            "暂时可跳过此方案，使用 faster-whisper GPU。"
+            "暂时可跳过此方案，使用 faster-whisper GPU。")
 
     # 提取音频
     print("  提取音频...")
