@@ -1,16 +1,5 @@
 import os
 import sys
-
-# === GPU CUDA DLL 路径注入（必须在任何 CUDA 库加载前执行）===
-_py_base = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
-if _py_base.exists():
-    for _d in _py_base.rglob("bin"):
-        try:
-            os.add_dll_directory(str(_d))
-        except Exception:
-            pass
-# ================================================================
-
 import io
 import json
 import time
@@ -23,6 +12,16 @@ from tkinter import filedialog, messagebox, ttk
 from pathlib import Path
 from datetime import datetime
 from tkinterdnd2 import TkinterDnD
+
+# === GPU CUDA DLL 路径注入（必须在 faster-whisper 加载前执行）===
+_py_base = Path(sys.executable).parent / "Lib" / "site-packages" / "nvidia"
+if _py_base.exists():
+    for _d in _py_base.rglob("bin"):
+        try:
+            os.add_dll_directory(str(_d))
+        except Exception:
+            pass
+# ================================================================
 
 # Windows GBK 控制台无法输出 emoji，统一用 LogWriter 拦截所有 print
 # 原理：替换 sys.stdout 为自定义 writer，输出到日志文件（UTF-8）+ GUI Text 控件
