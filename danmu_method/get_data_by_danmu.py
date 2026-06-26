@@ -420,12 +420,12 @@ class DanmakuAnalyzer:
         if not ApiConfig.API_KEY:
             print("未配置 API Key，无法调用 LLM 生成摘要。请在高级配置中填写 API Key。")
             return {"title": "未配置 API Key", "summary": "", "cover_text_1": "", "cover_text_2": "", "highlight_reason": "请先在设置中填写 API Key"}
-        # 弹幕往前回溯5秒，往后延迟5秒，获取更完整的信息，最多保留50条不重复的弹幕
+        # 弹幕往前回溯5秒，往后延迟5秒，最多保留40条不重复弹幕（控制 prompt 长度）
         danmaku_context = [d['text'] for d in self.danmaku_data if start-5 <= d['time'] <= end+5]
-        danmaku_text = '\n'.join([f"- {t}" for t in list(set(danmaku_context))[:50]]) or "(无弹幕)"
-        # 字幕往前回溯25秒，往后延迟5秒，获取更完整的信息
+        danmaku_text = '\n'.join([f"- {t}" for t in list(set(danmaku_context))[:40]]) or "(无弹幕)"
+        # 字幕往前回溯25秒，往后延迟5秒，最多保留30条（控制 prompt 长度）
         sub_context = [s for s in self.subtitle_data if s['start'] <= end+5 and s['end'] >= start-25]
-        sub_text = '\n'.join([f"{self.format_time(s['start'])}: {s['text']}" for s in sub_context]) or "(无字幕)"
+        sub_text = '\n'.join([f"{self.format_time(s['start'])}: {s['text']}" for s in sub_context[:30]]) or "(无字幕)"
 
         active_members = [k for k, v in MEMBER_STATUS.items() if v == 1]
 
@@ -468,15 +468,24 @@ class DanmakuAnalyzer:
                     'model': ApiConfig.MODEL_NAME,
                     'messages': [{'role': 'user', 'content': prompt}],
                     'temperature': 0.7,
-                    'max_tokens': 600
+                    'max_tokens': 1200
                 },
                 timeout=ApiConfig.TIMEOUT
             )
-            
+
             if response.status_code == 200:
                 ai_content = response.json()['choices'][0]['message']['content']
-                clean_json = re.sub(r'```json\s*|\s*```', '', ai_content).strip()
-                result_json = json.loads(clean_json)
+                # 鲁棒 JSON 提取：尝试多种格式
+                result_json = self._parse_ai_json(ai_content)
+                if result_json is None:
+                    print(f"  ⚠ AI 返回无法解析为 JSON，原文: {ai_content[:200]}...")
+                    return {
+                        "title": ai_content[:80] or "AI解析失败",
+                        "summary": "",
+                        "cover_text_1": "",
+                        "cover_text_2": "",
+                        "highlight_reason": ""
+                    }
                 time_str = f"{self.format_time(start)}-{self.format_time(end)}"
                 result_json = {
                     "timestamp": time_str,
@@ -484,9 +493,47 @@ class DanmakuAnalyzer:
                 }
                 return result_json
             else:
-                return {"title": f"AI错误 {response.status_code}"}
-        except Exception:
-            return {"title": "AI生成失败"}
+                print(f"  ⚠ AI API 返回错误: {response.status_code} {response.text[:200]}")
+                return {"title": f"AI错误 HTTP{response.status_code}"}
+        except Exception as e:
+            print(f"  ⚠ AI 生成失败: {e}")
+            return {"title": f"AI失败: {str(e)[:60]}"}
+
+    def _parse_ai_json(self, ai_content):
+        """从 AI 响应中提取 JSON，支持多种格式"""
+        # 尝试1: 直接解析
+        try:
+            return json.loads(ai_content.strip())
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试2: 去除 markdown 代码块
+        cleaned = re.sub(r'```(?:json)?\s*\n?', '', ai_content)
+        cleaned = re.sub(r'\n?\s*```', '', cleaned)
+        cleaned = cleaned.strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+
+        # 尝试3: 提取第一个 { 到最后一个 } 之间的内容
+        match = re.search(r'\{.*\}', ai_content, re.S)
+        if match:
+            try:
+                return json.loads(match.group())
+            except json.JSONDecodeError:
+                pass
+
+        # 尝试4: 修复常见错误后重试
+        try:
+            fixed = cleaned.replace('：', ':').replace('，', ',').replace('""', '"')
+            fixed = re.sub(r',\s*}', '}', fixed)
+            fixed = re.sub(r',\s*]', ']', fixed)
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+        return None
 
     def format_time(self, seconds):
         h = int(seconds // 3600)

@@ -1210,10 +1210,13 @@ class AppLauncher(TkinterDnD.Tk):
         video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
         videos = [f for f in Path(target).rglob("*") if f.suffix.lower() in video_exts]
         if not videos:
-            raise RuntimeError("没有视频文件，无法生成字幕")
+            raise RuntimeError(f"在 {target} 中未找到视频文件（支持: {', '.join(sorted(video_exts))}）")
+        # 优先选最大的视频文件（通常是最完整的录播）
+        videos.sort(key=lambda f: f.stat().st_size, reverse=True)
         video = videos[0]
-        self.log(f"  视频: {video.name}")
-        self.log("  使用必剪 (Bcut) 免费 ASR 识别，请稍候...")
+        size_mb = video.stat().st_size / (1024 * 1024)
+        self.log(f"  找到 {len(videos)} 个视频，选用: {video.name} ({size_mb:.0f} MB)")
+        self.log("  使用必剪 (Bcut) 免费 ASR 识别，预计需要 1-3 分钟...")
         from utils.bcut_asr import video_to_srt
         srt_path = video_to_srt(str(video), target)
         self.log(f"  字幕已生成: {Path(srt_path).name}")
