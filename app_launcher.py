@@ -1571,10 +1571,13 @@ class AppLauncher(TkinterDnD.Tk):
                 except Exception as e:
                     self.log(f"  B站API字幕下载失败: {e}")
 
+            # 下载完成后刷新文件列表，否则 _get_selected_video 找不到文件
+            self._check_environment()
+
             if self._check_srt_exists():
                 self.log("  ✓ B站官方字幕已就绪")
             else:
-                self.log("  B站无官方字幕（大部分A-SOUL录播无），启动 ASR 生成...")
+                self.log("  B站无官方字幕，启动 ASR 生成...")
                 self._generate_srt_for_video()
 
             # [3/4] 弹幕下载
@@ -1591,9 +1594,10 @@ class AppLauncher(TkinterDnD.Tk):
             else:
                 self.log("  ⚠ 弹幕下载失败（无弹幕将自动跳过分析）")
 
-            # [4/4] 智能整理
+            # [4/4] 智能整理 + 刷新
             self.log("  [4/4] 整理文件...")
             self._organize_files()
+            self._check_environment()
             self._mark_step(1, "done")
 
         self._run_worker("BV下载", task)
@@ -1731,20 +1735,24 @@ class AppLauncher(TkinterDnD.Tk):
         return len(ass_files) > 0
 
     def _generate_srt_for_video(self):
-        """用 ASR 为选中视频生成 SRT 字幕（保存到视频同目录）"""
+        """用 ASR 为选中视频生成 SRT 字幕"""
         if self._stop_requested:
             raise InterruptedError("用户终止")
+        # 确保文件列表是最新的
+        self._check_environment()
         video = self._get_selected_video()
         if not video:
-            raise RuntimeError("未找到视频文件")
+            raise RuntimeError(
+                "未找到视频文件。\n"
+                "BV模式: 检查BV号是否正确、网络是否通畅\n"
+                "视频模式: 请拖入视频文件"
+            )
 
-        # SRT 保存到视频所在目录（而非 input_dir 根目录）
         output_dir = str(video.parent)
         from utils.local_asr import auto_generate_srt_robust
         srt_path = auto_generate_srt_robust(str(video), output_dir)
-        if self._stop_requested:
-            self.log("  用户终止，字幕已生成的部分可用")
         self.log(f"  字幕已生成: {Path(srt_path).name}")
+        self._check_environment()
 
     def _step1_func(self):
         if self._mode.get() == "bv":
@@ -1767,14 +1775,13 @@ class AppLauncher(TkinterDnD.Tk):
             output = (result.stdout or result.stderr or "")[-300:]
             self.log(output if output else "下载完成")
 
-            # 检测 SRT 字幕是否存在
+            self._check_environment()
             if not self._check_srt_exists():
-                self.log("  ⚠ B站无官方字幕，自动用必剪免费 ASR 生成...")
+                self.log("  B站无官方字幕，启动 ASR 生成...")
                 self._generate_srt_for_video()
             else:
                 self.log("  已检测到 SRT 字幕文件 ✓")
         else:
-            # 视频路径：必剪免费 ASR 生成字幕
             self._generate_srt_for_video()
 
     def _find_srt_time_range(self):

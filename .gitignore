@@ -24,6 +24,8 @@ env/
 workspace/video_input/
 workspace/clip_output/
 workspace/logs/
+素材/
+__no_danmaku__/
 
 # 系统文件
 Thumbs.db
