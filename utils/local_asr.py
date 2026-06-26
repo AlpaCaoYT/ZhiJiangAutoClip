@@ -120,36 +120,43 @@ def transcribe_local(video_path, output_dir=None, model_size="small"):
 # ==========================================
 
 def auto_generate_srt_robust(video_path, output_dir=None):
-    """三级回退: 必剪(free) → 本地Whisper(free) → 报错"""
-    # 第1优先: 必剪
+    """四级回退: 必剪 → SenseVoice(中文最优) → 本地Whisper → WhisperAPI"""
+    # [1] 必剪 (B站免费接口)
     try:
-        print("  [1/3] 尝试必剪 (Bcut) 免费 ASR...")
+        print("  [1/4] 尝试必剪 (Bcut) 免费 ASR...")
         from utils.bcut_asr import video_to_srt
         return video_to_srt(video_path, output_dir)
     except Exception as e:
         print(f"  必剪失败: {e}")
 
-    # 第2优先: 本地 Whisper（完全免费）
+    # [2] SenseVoiceSmall (阿里通义千问 — 中文准确率优于 Whisper)
     try:
-        print("  [2/3] 回退到本地 Whisper (免费，首次需下载模型)...")
+        print("  [2/4] 尝试 SenseVoiceSmall (阿里通义千问, 中文最优)...")
+        from utils.sensevoice_asr import transcribe_sensevoice
+        return transcribe_sensevoice(video_path, output_dir)
+    except Exception as e:
+        print(f"  SenseVoice 失败: {e}")
+
+    # [3] 本地 faster-whisper (通用方案)
+    try:
+        print("  [3/4] 回退到本地 faster-whisper...")
         return transcribe_local(video_path, output_dir, model_size="small")
     except Exception as e:
-        print(f"  本地 Whisper 失败: {e}")
+        print(f"  faster-whisper 失败: {e}")
 
-    # 第3优先: Whisper API（需 Key）
+    # [4] Whisper API (需 Key)
     try:
-        print("  [3/3] 回退到 Whisper API...")
+        print("  [4/4] 回退到 Whisper API...")
         from utils.whisper_asr import video_to_srt_whisper
         return video_to_srt_whisper(video_path, output_dir)
     except Exception as e:
         print(f"  Whisper API 也失败: {e}")
 
     raise RuntimeError(
-        "所有 ASR 方案均失败。\n"
-        "  [1] 必剪 (B站接口): 可能限流或需登录\n"
-        "  [2] 本地 Whisper: pip install faster-whisper\n"
-        "  [3] Whisper API: 在高级配置中设置 STT 接口\n"
-        "至少需要其中一种可用。"
+        "所有 ASR 方案均失败。至少需要一种可用:\n"
+        "  pip install funasr modelscope  (SenseVoice, 中文最优)\n"
+        "  pip install faster-whisper     (本地 Whisper)\n"
+        "  或配置 STT 接口 (Whisper API)"
     )
 
 
