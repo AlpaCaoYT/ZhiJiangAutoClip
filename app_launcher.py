@@ -103,6 +103,7 @@ class AppLauncher(TkinterDnD.Tk):
 
         self._running = False
         self._stop_requested = False
+        self._auto_mode = tk.BooleanVar(value=saved.get("auto_mode", True))
         self._advanced_showing = False
         self._mode = tk.StringVar(value="bv")  # "bv" 或 "video"
         self._step_done = {1: False, 2: False, 3: False, 4: False}
@@ -325,6 +326,13 @@ class AppLauncher(TkinterDnD.Tk):
         self.btn_stop.pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(flow_bottom, text="编辑切片数据",
                    command=self._edit_data_source).pack(side=tk.RIGHT, padx=(4, 0))
+
+        # 全自动模式开关
+        auto_row = ttk.Frame(actions)
+        auto_row.pack(fill=tk.X, pady=(0, 2))
+        self._auto_cb = ttk.Checkbutton(auto_row, text="全自动模式（出错自动跳过，不弹窗询问）",
+                                         variable=self._auto_mode)
+        self._auto_cb.pack(side=tk.LEFT)
 
         # 快捷工具
         util_row = ttk.Frame(actions)
@@ -580,6 +588,7 @@ class AppLauncher(TkinterDnD.Tk):
                 "stt_api_key": self._stt_key_var.get().strip(),
                 "stt_base_url": self._stt_url_var.get().strip(),
                 "stt_model": self._stt_model_var.get().strip(),
+                "auto_mode": self._auto_mode.get(),
             }
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1189,7 +1198,10 @@ class AppLauncher(TkinterDnD.Tk):
             self.run_auto_clip()
 
     def _ask_skip(self, step_name):
-        """弹窗询问：失败后跳过还是重试"""
+        """弹窗询问：失败后跳过还是重试。全自动模式下自动跳过。"""
+        if self._auto_mode.get():
+            self.log(f"  全自动模式: 自动跳过「{step_name}」")
+            return "skip"
         result = messagebox.askyesnocancel("步骤失败",
             f"「{step_name}」失败了。\n\n"
             "是 = 跳过，继续下一步\n"
@@ -1451,26 +1463,35 @@ class AppLauncher(TkinterDnD.Tk):
         return int(h) * 3600 + int(m) * 60 + float(s)
 
     def _generate_default_data_source(self):
-        """无弹幕时，基于 SRT 时间范围生成一个默认全段切片条目"""
+        """无 Data_source.txt 时，基于 SRT 时间范围自动切片（每3分钟一段）"""
         start_s, end_s = self._find_srt_time_range()
-        start_str = self._format_seconds(start_s)
-        end_str = self._format_seconds(end_s)
-        # 从 SRT 文件名推断标题
+        duration = end_s - start_s
         target = self.input_dir_var.get().strip()
         srts = list(Path(target).rglob("*.srt"))
         video_name = srts[0].stem if srts else "未命名"
-        clip = [{
-            "timestamp": f"{start_str}-{end_str}",
-            "title": f"{video_name}（字幕版）",
-            "summary": "基于必剪ASR字幕生成的完整片段",
-            "cover_text_1": video_name[:10],
-            "cover_text_2": "字幕版",
-            "highlight_reason": "字幕识别完成"
-        }]
+
+        # 每段最多3分钟，自动分段
+        segment_sec = 180
+        clips = []
+        seg_start = start_s
+        seg_num = 1
+        while seg_start < end_s:
+            seg_end = min(seg_start + segment_sec, end_s)
+            clips.append({
+                "timestamp": f"{self._format_seconds(seg_start)}-{self._format_seconds(seg_end)}",
+                "title": f"{video_name}#{seg_num}",
+                "summary": f"自动切片第{seg_num}段",
+                "cover_text_1": video_name[:10],
+                "cover_text_2": f"P{seg_num}",
+                "highlight_reason": "自动分段"
+            })
+            seg_start = seg_end
+            seg_num += 1
+
         ds_path = os.path.join(target, "Data_source.txt")
         with open(ds_path, "w", encoding="utf-8") as f:
-            json.dump(clip, f, ensure_ascii=False, indent=2)
-        self.log(f"  已生成默认片段: {ds_path}")
+            json.dump(clips, f, ensure_ascii=False, indent=2)
+        self.log(f"  已自动生成 {len(clips)} 个默认片段 ({duration/60:.0f}分钟 → 每{segment_sec}秒一段)")
 
     @staticmethod
     def _format_seconds(seconds):
