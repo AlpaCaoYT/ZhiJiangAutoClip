@@ -539,6 +539,9 @@ class AppLauncher(TkinterDnD.Tk):
                 key=lambda f: f.stat().st_size, reverse=True
             )
             srts = [f for f in input_path.rglob("*.srt") if "__no_danmaku__" not in str(f)]
+            # 自动繁→简（处理已有字幕）
+            for srt in srts:
+                self._convert_srt_to_simplified(str(srt))
             ass = [f for f in input_path.rglob("*.ass") if "__no_danmaku__" not in str(f)]
 
             parts = []
@@ -609,6 +612,16 @@ class AppLauncher(TkinterDnD.Tk):
                 self._ass_combo["values"] = ["(无弹幕 — 将自动跳过)"]
         else:
             self.input_label.config(text="输入目录: 不存在", foreground="#e44")
+
+        # 自动整理：素材根目录有视频文件 → 按分类归入子文件夹（防止递归）
+        if input_path.exists() and videos and not getattr(self, '_organizing', False):
+            root_videos = [v for v in videos if v.parent == input_path]
+            if root_videos:
+                self._organizing = True
+                try:
+                    self._organize_files()
+                finally:
+                    self._organizing = False
 
         # 快速诊断（后台线程，不阻塞 UI）
         threading.Thread(target=self._run_quick_diag, daemon=True).start()
@@ -864,8 +877,24 @@ class AppLauncher(TkinterDnD.Tk):
             text=f"分类: {cat}/  →  输入: {inp_base}/{cat}/  →  输出: {out_base}/{cat}/",
             foreground="#4a4")
 
+    def _convert_srt_to_simplified(self, srt_path):
+        """将 SRT 字幕从繁体转为简体"""
+        try:
+            import zhconv
+            with open(srt_path, "r", encoding="utf-8-sig") as f:
+                text = f.read()
+            simplified = zhconv.convert(text, "zh-cn")
+            if simplified != text:
+                with open(srt_path, "w", encoding="utf-8-sig") as f:
+                    f.write(simplified)
+                return True
+        except ImportError:
+            pass
+        except Exception:
+            pass
+        return False
+
     def _organize_files(self):
-        """智能整理：按成员/CP/团播 + 日期自动归类到子文件夹"""
         base = Path(self.input_dir_var.get())
         if not base.exists():
             return
@@ -941,8 +970,12 @@ class AppLauncher(TkinterDnD.Tk):
                     dst = target_dir / f"{name}{ext}"
                     shutil.move(str(src), str(dst))
 
-        self.log(f"  文件整理完成: {moved} 个视频归入 {category}/ 子文件夹")
+        self.log(f"  文件整理完成: {moved} 个视频归入 {category}/{folder_name}/")
         self._refresh_input_list()
+        # 自动选中整理后的子文件夹
+        subfolder = str(base / category / folder_name)
+        if os.path.isdir(subfolder):
+            self.input_dir_var.set(subfolder)
         self._check_environment()
 
     def _on_combo_select(self, event=None):
