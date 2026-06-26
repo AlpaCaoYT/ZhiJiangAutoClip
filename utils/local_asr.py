@@ -149,43 +149,35 @@ def transcribe_local(video_path, output_dir=None, model_size="small"):
 # ==========================================
 
 def auto_generate_srt_robust(video_path, output_dir=None):
-    """四级回退: 必剪 → SenseVoice(中文最优) → 本地Whisper → WhisperAPI"""
-    # [1] 必剪 (B站免费接口)
+    """三级回退: 必剪(云端秒级) → faster-whisper GPU → WhisperAPI"""
+    # [1] 必剪 (B站云端秒级，最快)
     try:
-        print("  [1/4] 尝试必剪 (Bcut) 免费 ASR...")
+        print("  [1/3] 必剪 Bcut ASR...")
         from utils.bcut_asr import video_to_srt
         return video_to_srt(video_path, output_dir)
     except Exception as e:
-        print(f"  必剪失败: {e}")
+        print(f"  必剪不可用: {e}")
 
-    # [2] SenseVoiceSmall (阿里通义千问 — 中文准确率优于 Whisper)
+    # [2] faster-whisper large-v3 GPU（本地，已就绪）
     try:
-        print("  [2/4] 尝试 SenseVoiceSmall (阿里通义千问, 中文最优)...")
-        from utils.sensevoice_asr import transcribe_sensevoice
-        return transcribe_sensevoice(video_path, output_dir)
-    except Exception as e:
-        print(f"  SenseVoice 失败: {e}")
-
-    # [3] 本地 faster-whisper (通用方案)
-    try:
-        print("  [3/4] 回退到本地 faster-whisper...")
+        print("  [2/3] faster-whisper large-v3 GPU...")
         return transcribe_local(video_path, output_dir, model_size="large-v3")
     except Exception as e:
-        print(f"  faster-whisper 失败: {e}")
+        print(f"  whisper 失败: {e}")
 
-    # [4] Whisper API (需 Key)
+    # [3] Whisper API（需配 STT Key）
     try:
-        print("  [4/4] 回退到 Whisper API...")
+        print("  [3/3] Whisper API...")
         from utils.whisper_asr import video_to_srt_whisper
         return video_to_srt_whisper(video_path, output_dir)
     except Exception as e:
         print(f"  Whisper API 也失败: {e}")
 
     raise RuntimeError(
-        "所有 ASR 方案均失败。至少需要一种可用:\n"
-        "  pip install funasr modelscope  (SenseVoice, 中文最优)\n"
-        "  pip install faster-whisper     (本地 Whisper)\n"
-        "  或配置 STT 接口 (Whisper API)"
+        "字幕生成失败。\n"
+        "  必剪 Bcut: 已失效 (B站接口需登录)\n"
+        "  faster-whisper GPU: 失败 (检查 CUDA/cuBLAS)\n"
+        "  Whisper API: 未配置 (高级设置→STT接口)"
     )
 
 
