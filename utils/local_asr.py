@@ -56,8 +56,11 @@ def transcribe_local(video_path, output_dir=None, model_size="small"):
 
     try:
         # 加载模型（自动下载到缓存目录）
-        compute = "int8"  # CPU 优化，GPU 可用 "float16"
-        model = WhisperModel(model_size, device="cpu", compute_type=compute)
+        compute = "int8"
+        # 模型存项目本地，避免下载到C盘
+        model_dir = str(Path(__file__).resolve().parent.parent / "models")
+        model = WhisperModel(model_size, device="cpu", compute_type=compute,
+                             download_root=model_dir)
         print(f"  模型已加载，开始识别...")
 
         # 识别
