@@ -318,8 +318,12 @@ class AppLauncher(TkinterDnD.Tk):
             all_on = all(v.get() for v in self._member_vars.values())
             for v in self._member_vars.values():
                 v.set(not all_on)
+            self._preview_output_folder()
         ttk.Button(member_row, text="全选/取消", width=9,
                    command=_toggle_all).pack(side=tk.LEFT, padx=(8, 0))
+        # 成员勾选变化时更新文件夹预览
+        for var in self._member_vars.values():
+            var.trace_add("write", lambda *_: self._preview_output_folder())
 
         # API 状态条
         api_bar = ttk.Frame(actions)
@@ -792,6 +796,37 @@ class AppLauncher(TkinterDnD.Tk):
             first_name = list(self._input_dirs.keys())[0]
             self._input_display_var.set(first_name)
             self.input_dir_var.set(self._input_dirs[first_name])
+
+    def _preview_output_folder(self):
+        """根据成员选择预生成分类名，显示在视频预览区"""
+        active = [n for n, v in self._member_vars.items() if v.get()]
+        if not active:
+            return
+
+        aso = {"嘉然", "贝拉", "乃琳"}
+        active_aso = [n for n in active if n in aso]
+        active_ss = [n for n in active if n not in aso]
+
+        if len(active) == 1:
+            cat = active[0]
+        elif set(active) == {"心宜", "思诺"}:
+            cat = "小心思"
+        elif len(active) == 2 and all(n in aso for n in active):
+            cat = "×".join(sorted(active))
+        elif len(active_aso) >= 2 and active_ss:
+            cat = "枝江大团播"
+        elif len(active_aso) >= 2:
+            cat = "ASOUL团播"
+        elif active_ss:
+            cat = "闪耀舞台"
+        else:
+            cat = "其他"
+
+        out_base = self.output_dir_var.get().rstrip("/")
+        inp_base = self.input_dir_var.get().rstrip("/")
+        self._video_preview_label.config(
+            text=f"分类: {cat}/  →  输入: {inp_base}/{cat}/  →  输出: {out_base}/{cat}/",
+            foreground="#4a4")
 
     def _organize_files(self):
         """智能整理：按成员/CP/团播 + 日期自动归类到子文件夹"""
@@ -1319,7 +1354,22 @@ class AppLauncher(TkinterDnD.Tk):
         os.environ["PYTHONUTF8"] = "1"
         os.environ["AUTOCLIP_INPUT_DIR"] = self.input_dir_var.get().strip()
         os.environ["AUTOCLIP_OUTPUT_DIR"] = self.output_dir_var.get().strip()
-        os.environ["DANMU_INPUT_DIR"] = self.input_dir_var.get().strip()
+        # 弹幕分析目录：有有效ASS文件时指向其所在目录，否则指向空目录防止用旧文件
+        target = self.input_dir_var.get().strip()
+        ass_file = self._get_selected_ass()
+        if ass_file and ass_file.exists():
+            os.environ["DANMU_INPUT_DIR"] = str(ass_file.parent)
+            os.environ["AUTOCLIP_ASS_FILE"] = str(ass_file)
+        else:
+            # 无有效弹幕 → 指向空目录，阻止 DanmakuAnalyzer 用旧文件
+            empty_dir = os.path.join(target, "__no_danmaku__")
+            os.makedirs(empty_dir, exist_ok=True)
+            os.environ["DANMU_INPUT_DIR"] = empty_dir
+            os.environ.pop("AUTOCLIP_ASS_FILE", None)
+        # 字幕文件
+        srt_file = self._get_selected_srt()
+        if srt_file and srt_file.exists():
+            os.environ["AUTOCLIP_SRT_FILE"] = str(srt_file)
         os.environ["ASR_TARGET_FOLDER"] = self.input_dir_var.get().strip()
         os.environ["SILICONFLOW_API_KEY"] = self.api_key_var.get().strip()
         os.environ["SILICONFLOW_BASE_URL"] = self.api_base_var.get().strip()
@@ -1332,13 +1382,6 @@ class AppLauncher(TkinterDnD.Tk):
         # 封面配置
         os.environ["AUTOCLIP_COVER_STYLE"] = self._cover_style_var.get().strip()
         os.environ["AUTOCLIP_COVER_COUNT"] = self._cover_count_var.get().strip()
-        # 指定具体文件（解决多文件歧义）
-        srt = self._get_selected_srt()
-        ass = self._get_selected_ass()
-        if srt:
-            os.environ["AUTOCLIP_SRT_FILE"] = str(srt)
-        if ass:
-            os.environ["AUTOCLIP_ASS_FILE"] = str(ass)
         # STT 语音识别接口
         os.environ["STT_API_KEY"] = self._stt_key_var.get().strip()
         os.environ["STT_BASE_URL"] = self._stt_url_var.get().strip()
@@ -1359,6 +1402,7 @@ class AppLauncher(TkinterDnD.Tk):
         """切换素材来源模式时刷新步骤描述"""
         self._update_mode_hint()
         self._reset_steps()
+        self._preview_output_folder()
 
     def _reset_steps(self):
         self._step_done = {1: False, 2: False, 3: False, 4: False}
