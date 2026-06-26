@@ -93,8 +93,14 @@ class AppLauncher(TkinterDnD.Tk):
 
         saved = _load_config()
 
-        self.input_dir_var = tk.StringVar(value=saved.get("input_dir", str(DEFAULT_INPUT_DIR)))
-        self.output_dir_var = tk.StringVar(value=saved.get("output_dir", str(DEFAULT_OUTPUT_DIR)))
+        input_val = saved.get("input_dir", str(DEFAULT_INPUT_DIR))
+        if not os.path.isdir(input_val):
+            input_val = str(DEFAULT_INPUT_DIR)
+        output_val = saved.get("output_dir", str(DEFAULT_OUTPUT_DIR))
+        if not os.path.isdir(output_val):
+            output_val = str(DEFAULT_OUTPUT_DIR)
+        self.input_dir_var = tk.StringVar(value=input_val)
+        self.output_dir_var = tk.StringVar(value=output_val)
         self.api_key_var = tk.StringVar(value=os.environ.get("SILICONFLOW_API_KEY", saved.get("api_key", "")))
         self.api_base_var = tk.StringVar(value=os.environ.get("SILICONFLOW_BASE_URL", saved.get("api_base", "https://api.deepseek.com/v1/chat/completions")))
         self.api_model_var = tk.StringVar(value=os.environ.get("SILICONFLOW_MODEL", saved.get("api_model", "deepseek-v4-pro")))
