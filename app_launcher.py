@@ -810,18 +810,15 @@ class AppLauncher(TkinterDnD.Tk):
         base = Path(self.input_dir_var.get())
         self._input_dirs = {}
         if base.exists():
-            # 扫描两级子目录（如 心宜/6月26日xxx/）
             for child in sorted(base.iterdir()):
-                if child.is_dir():
-                    # 直接子文件夹
-                    has_media = any(child.rglob(f"*{ext}") for ext in [".mp4", ".flv", ".mkv", ".mov", ".ts", ".srt", ".ass"])
-                    if has_media:
-                        self._input_dirs[child.name] = str(child)
-                    # 嵌套子文件夹（如 心宜/6月26日/）
-                    for grandchild in sorted(child.iterdir()):
-                        if grandchild.is_dir():
-                            key = f"{child.name}/{grandchild.name}"
-                            self._input_dirs[key] = str(grandchild)
+                if not child.is_dir() or "__no_danmaku__" in child.name:
+                    continue
+                has_media = any(child.rglob(f"*{ext}") for ext in [".mp4", ".flv", ".mkv", ".mov", ".ts", ".srt", ".ass"])
+                if has_media:
+                    self._input_dirs[child.name] = str(child)
+                for grandchild in sorted(child.iterdir()):
+                    if grandchild.is_dir() and "__no_danmaku__" not in grandchild.name:
+                        self._input_dirs[f"{child.name}/{grandchild.name}"] = str(grandchild)
         if not self._input_dirs:
             self._input_dirs[base.name] = str(base)
         self.input_combo["values"] = list(self._input_dirs.keys())
