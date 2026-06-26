@@ -189,25 +189,29 @@ class DanmakuAnalyzer:
 
         # 未指定则自动检测
         if not self.ass_file or not self.srt_file:
-            print(f"正在扫描文件夹: {self.input_dir}")
+            print(f"正在扫描: {self.input_dir}")
             if not os.path.exists(self.input_dir):
-                raise FileNotFoundError(f"文件夹不存在 -> {self.input_dir}")
+                raise FileNotFoundError(f"目录不存在 -> {self.input_dir}")
 
-            files = os.listdir(self.input_dir)
-            ass_files = [f for f in files if f.lower().endswith('.ass')]
-            srt_files = [f for f in files if f.lower().endswith('.srt')]
+            # 递归扫描子目录
+            all_files = []
+            for root, dirs, files in os.walk(self.input_dir):
+                for f in files:
+                    all_files.append(os.path.join(root, f))
+            ass_files = [f for f in all_files if f.lower().endswith('.ass')]
+            srt_files = [f for f in all_files if f.lower().endswith('.srt')]
 
             if not self.ass_file:
                 if len(ass_files) == 0:
-                    raise FileNotFoundError("在文件夹中未找到 .ass 弹幕文件")
-                self.ass_file = os.path.join(self.input_dir, ass_files[0])
-                print(f"✅ 已锁定弹幕文件: {ass_files[0]}")
+                    raise FileNotFoundError(f"未找到 .ass 弹幕文件（扫描: {self.input_dir}）")
+                self.ass_file = ass_files[0]  # os.walk 已返回完整路径
+                print(f"✅ 弹幕: {os.path.basename(ass_files[0])}")
 
             if not self.srt_file:
                 if len(srt_files) == 0:
-                    raise FileNotFoundError("在文件夹中未找到 .srt 字幕文件")
-                self.srt_file = os.path.join(self.input_dir, srt_files[0])
-                print(f"✅ 已锁定字幕文件: {srt_files[0]}")
+                    raise FileNotFoundError(f"未找到 .srt 字幕文件（扫描: {self.input_dir}）")
+                self.srt_file = srt_files[0]
+                print(f"✅ 字幕: {os.path.basename(srt_files[0])}")
 
         print("-" * 50)
 

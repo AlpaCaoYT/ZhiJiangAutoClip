@@ -535,11 +535,11 @@ class AppLauncher(TkinterDnD.Tk):
         input_path = Path(self.input_dir_var.get())
         if input_path.exists():
             videos = sorted(
-                [f for f in input_path.rglob("*") if f.suffix.lower() in {".mp4", ".flv", ".mkv", ".mov", ".ts"}],
+                [f for f in input_path.rglob("*") if f.suffix.lower() in {".mp4", ".flv", ".mkv", ".mov", ".ts"} and "__no_danmaku__" not in str(f)],
                 key=lambda f: f.stat().st_size, reverse=True
             )
-            srts = [f for f in input_path.rglob("*.srt")]
-            ass = [f for f in input_path.rglob("*.ass")]
+            srts = [f for f in input_path.rglob("*.srt") if "__no_danmaku__" not in str(f)]
+            ass = [f for f in input_path.rglob("*.ass") if "__no_danmaku__" not in str(f)]
 
             parts = []
             if videos:
@@ -1393,20 +1393,16 @@ class AppLauncher(TkinterDnD.Tk):
         os.environ["PYTHONUTF8"] = "1"
         os.environ["AUTOCLIP_INPUT_DIR"] = self.input_dir_var.get().strip()
         os.environ["AUTOCLIP_OUTPUT_DIR"] = self.output_dir_var.get().strip()
-        # 弹幕分析目录：有有效ASS文件时指向其所在目录，否则指向空目录防止用旧文件
+        # 弹幕/字幕分析目录：直接指向素材目录或视频所在子目录
         target = self.input_dir_var.get().strip()
         ass_file = self._get_selected_ass()
+        srt_file = self._get_selected_srt()
         if ass_file and ass_file.exists():
             os.environ["DANMU_INPUT_DIR"] = str(ass_file.parent)
             os.environ["AUTOCLIP_ASS_FILE"] = str(ass_file)
         else:
-            # 无有效弹幕 → 指向空目录，阻止 DanmakuAnalyzer 用旧文件
-            empty_dir = os.path.join(target, "__no_danmaku__")
-            os.makedirs(empty_dir, exist_ok=True)
-            os.environ["DANMU_INPUT_DIR"] = empty_dir
+            os.environ["DANMU_INPUT_DIR"] = target
             os.environ.pop("AUTOCLIP_ASS_FILE", None)
-        # 字幕文件
-        srt_file = self._get_selected_srt()
         if srt_file and srt_file.exists():
             os.environ["AUTOCLIP_SRT_FILE"] = str(srt_file)
         os.environ["ASR_TARGET_FOLDER"] = self.input_dir_var.get().strip()
