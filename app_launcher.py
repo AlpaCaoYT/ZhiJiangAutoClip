@@ -84,6 +84,13 @@ class AppLauncher(TkinterDnD.Tk):
         self.geometry("1000x820")
         self.minsize(800, 600)
 
+        # 现代主题（sv_ttk Sun Valley，Windows 11 风格）
+        try:
+            import sv_ttk
+            sv_ttk.set_theme("dark")
+        except ImportError:
+            pass  # 未安装时回退默认主题
+
         saved = _load_config()
 
         self.input_dir_var = tk.StringVar(value=saved.get("input_dir", str(DEFAULT_INPUT_DIR)))

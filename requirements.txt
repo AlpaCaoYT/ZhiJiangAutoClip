@@ -1,4 +1,8 @@
-fonttools==4.60.1
-Pillow==12.0.0
-Requests==2.32.5
-yt-dlp>=2024.0.0
+fonttools>=4.60
+Pillow>=12.0
+Requests>=2.32
+yt-dlp>=2024.0
+pydub>=0.25
+tkinterdnd2>=0.4
+sv-ttk>=2.6
+yutto>=2.0
