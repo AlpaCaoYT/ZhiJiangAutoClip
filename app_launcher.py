@@ -57,8 +57,8 @@ sys.stderr = _LogWriter()
 PROJECT_ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = PROJECT_ROOT / "app_config.json"
 LOG_DIR = PROJECT_ROOT / "workspace" / "logs"
-DEFAULT_INPUT_DIR = PROJECT_ROOT / "workspace" / "video_input"
-DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "workspace" / "clip_output"
+DEFAULT_INPUT_DIR = PROJECT_ROOT / "素材"
+DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "切片输出"
 
 
 def _load_config():

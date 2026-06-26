@@ -17,7 +17,7 @@ class FileConfig:
     # .ass代表弹幕文件，其中包含弹幕信息
     # 一定要确定该输入文件夹下有且仅有一个 .ass 和 .srt 文件，如果有多个字幕文件或者弹幕文件，程序会报错
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
-    INPUT_DIR = os.environ.get("DANMU_INPUT_DIR", str(PROJECT_ROOT / "workspace" / "video_input"))
+    INPUT_DIR = os.environ.get("DANMU_INPUT_DIR", str(PROJECT_ROOT / "素材"))
     
     # 输出文件
     OUTPUT_FILE = 'Data_source.txt'

@@ -7,7 +7,7 @@ from pathlib import Path
 # 在这里填入你要处理的文件夹路径
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-TARGET_FOLDER = os.environ.get("ASR_TARGET_FOLDER", str(PROJECT_ROOT / "workspace" / "video_input"))
+TARGET_FOLDER = os.environ.get("ASR_TARGET_FOLDER", str(PROJECT_ROOT / "素材"))
 # ===========================================
 
 class FileBasedCorrector:

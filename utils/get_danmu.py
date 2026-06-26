@@ -17,7 +17,7 @@ VIDEO_INPUT = os.environ.get("BILIBILI_VIDEO_INPUT", "BV1bncwz6EPg")
 SESSDATA = os.environ.get("BILIBILI_SESSDATA", "")
 
 # 3. 输出目录
-OUTPUT_DIR = os.environ.get("BILIBILI_DANMAKU_OUTPUT_DIR", str(PROJECT_ROOT / "workspace" / "video_input" / "弹幕"))
+OUTPUT_DIR = os.environ.get("BILIBILI_DANMAKU_OUTPUT_DIR", str(PROJECT_ROOT / "素材" / "弹幕"))
 
 # 4. 多P视频处理选项
 DOWNLOAD_ALL_PARTS = True  # 是否下载所有分P（True=下载所有P，False=仅下载第一P）

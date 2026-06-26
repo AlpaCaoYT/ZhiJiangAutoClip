@@ -368,8 +368,8 @@ def run_diagnostics(input_dir=None):
 
     # 目录
     project_root = Path(__file__).resolve().parent.parent
-    default_input = input_dir or str(project_root / "workspace" / "video_input")
-    default_output = str(project_root / "workspace" / "clip_output")
+    default_input = input_dir or str(project_root / "素材")
+    default_output = str(project_root / "切片输出")
     results.append(_check_dir(default_input, "素材输入"))
     results.append(_check_dir(default_output, "切片输出"))
 

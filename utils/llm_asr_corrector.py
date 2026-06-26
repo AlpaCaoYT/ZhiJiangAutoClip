@@ -187,5 +187,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         llm_correct_folder(sys.argv[1])
     else:
-        target = os.environ.get("ASR_TARGET_FOLDER", "workspace/video_input")
+        target = os.environ.get("ASR_TARGET_FOLDER", "素材")
         llm_correct_folder(target)

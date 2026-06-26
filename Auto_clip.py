@@ -8,8 +8,8 @@ from core.metadata import load_source_meta, write_source_meta
 from core.video_processor import VideoProcessor
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_INPUT_ROOT = PROJECT_ROOT / "workspace" / "video_input"
-DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "workspace" / "clip_output"
+DEFAULT_INPUT_ROOT = PROJECT_ROOT / "素材"
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "切片输出"
 DEFAULT_FONT_PATH = PROJECT_ROOT / "assets" / "font" / "WenYue-XinQingNianTi-W8-J-2.otf"
 
 
