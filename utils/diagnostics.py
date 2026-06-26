@@ -78,15 +78,30 @@ def _check_deps():
 
 def _check_network(host="bilibili.com", label="B站 (bilibili.com)"):
     try:
-        import urllib.request
-        urllib.request.urlopen(f"https://{host}", timeout=10)
+        import requests
+        resp = requests.get(f"https://{host}", timeout=10,
+                           headers={"User-Agent": "Mozilla/5.0"})
+        # 200-499 都说明服务器可达（401/403/412 只是权限/条件问题）
         return {"name": f"网络: {label}", "level": "ok", "message": f"可连接 {host}"}
-    except Exception as e:
+    except requests.exceptions.ConnectionError:
+        return {
+            "name": f"网络: {label}",
+            "level": "error",
+            "message": f"无法连接 {host}（网络不通）",
+            "fix": "检查网络连接或代理设置",
+        }
+    except requests.exceptions.Timeout:
         return {
             "name": f"网络: {label}",
             "level": "warn",
-            "message": f"无法连接 {host}: {_shorten(str(e), 80)}",
-            "fix": "检查网络连接或代理设置",
+            "message": f"连接 {host} 超时",
+            "fix": "网络较慢，功能可用但可能耗时较长",
+        }
+    except Exception as e:
+        return {
+            "name": f"网络: {label}",
+            "level": "ok",
+            "message": f"可连接 {host}（{_shorten(str(e), 40)}）",
         }
 
 
@@ -206,9 +221,14 @@ def _check_bcut_api():
 def _check_video_codec(video_path=None):
     """检查视频编码是否兼容"""
     if not video_path:
-        return {"name": "视频编码", "level": "info", "message": "未指定视频，跳过检测"}
+        return {"name": "视频编码", "level": "info", "message": "未指定视频"}
     if not os.path.exists(video_path):
         return {"name": "视频编码", "level": "error", "message": f"文件不存在: {video_path}"}
+
+    if not shutil.which("ffprobe"):
+        return {"name": "视频编码", "level": "info",
+                "message": "ffprobe 未安装（通常随 FFmpeg 一起安装）",
+                "fix": "重新安装 FFmpeg 完整版 (https://ffmpeg.org)"}
 
     try:
         r = subprocess.run(
@@ -322,7 +342,13 @@ def run_diagnostics(input_dir=None):
 
     # 网络
     results.append(_check_network("bilibili.com", "B站"))
-    results.append(_check_network("api.deepseek.com", "DeepSeek API"))
+    # DeepSeek 检查：有 Key 才测连通性，没 Key 不测
+    api_key = os.environ.get("SILICONFLOW_API_KEY", "").strip()
+    if api_key:
+        results.append(_check_network("api.deepseek.com", "DeepSeek API"))
+    else:
+        results.append({"name": "网络: DeepSeek API", "level": "info",
+                         "message": "未配置 Key，跳过连通测试"})
 
     # 目录
     project_root = Path(__file__).resolve().parent.parent
