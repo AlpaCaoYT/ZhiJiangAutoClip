@@ -460,6 +460,36 @@ class DanmakuAnalyzer:
             danmaku_text=danmaku_text
         )
 
+        # 动态CP约束：只在双方都出场时才允许提CP
+        cp_allow = []
+        cp_block = []
+        all_members = {"嘉然", "贝拉", "乃琳", "心宜", "思诺"}
+        absent = all_members - active_set
+        # CP定义：(A, B, CP名)
+        cp_defs = [
+            ({"嘉然", "乃琳"}, "琳嘉女孩"),
+            ({"贝拉", "嘉然"}, "超级嘉贝"),
+            ({"贝拉", "乃琳"}, "乃贝"),
+            ({"心宜", "思诺"}, "小心思"),
+        ]
+        for pair, cp_name in cp_defs:
+            if pair.issubset(active_set):
+                cp_allow.append(cp_name)
+            elif pair & active_set and pair & absent:
+                cp_block.append((cp_name, (pair & absent).pop()))
+
+        cp_extra = ""
+        if cp_block:
+            cp_extra += "\n### ⚠️ 强制约束\n"
+            cp_extra += f"当前片段只有 {', '.join(active_members)} 在场。\n"
+            for cp_name, who in cp_block:
+                cp_extra += f"- **严禁**提「{cp_name}」CP，因为 {who} 不在场。\n"
+            cp_extra += "- 标题和摘要必须只涉及在场成员的个人表现，禁止涉及不在场成员。\n"
+        if cp_allow:
+            cp_extra += f"- 可以提的CP: {', '.join(cp_allow)} （仅当片段确实有互动时）\n"
+
+        prompt += cp_extra
+
         try:
             response = requests.post(
                 ApiConfig.BASE_URL,
