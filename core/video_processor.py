@@ -113,15 +113,26 @@ class VideoProcessor:
             
         cmd.extend(['-y', str(output_video)])
 
-        result = subprocess.run(cmd, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if result.returncode != 0:
-            err = result.stderr.decode("utf-8", errors="replace")[-500:] if result.stderr else "未知错误"
+        # 实时进度：Popen + 解析 stderr 的 time= 行
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                     text=True, encoding="utf-8", errors="replace")
+        last_pct = -1
+        for line in process.stderr:
+            time_match = re.search(r'time=(\d+):(\d+):(\d+)\.(\d+)', line)
+            if time_match:
+                h, m, s = int(time_match[1]), int(time_match[2]), int(time_match[3])
+                current_sec = h * 3600 + m * 60 + s
+                pct = min(99, int(current_sec / actual_duration * 100)) if actual_duration > 0 else 0
+                if pct > last_pct:
+                    bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
+                    print(f"    [{bar}] {pct}%", end="\r")
+                    last_pct = pct
+        process.wait()
+        print(f"    [██████████] 100% — {output_video.name}")
+
+        if process.returncode != 0:
+            err = process.stderr.read()[-500:] if process.stderr else "未知错误"
             raise RuntimeError(f"FFmpeg 切片失败: {err}")
-        # 从 stderr 提取时长信息显示进度
-        stderr_text = result.stderr.decode("utf-8", errors="replace") if result.stderr else ""
-        time_match = re.search(r'time=(\d+:\d+:\d+\.\d+)', stderr_text)
-        if time_match:
-            print(f"   已生成: {output_video.name} (时长: {time_match.group(1)})")
         
         if generate_cover:
             cover_config = self.config.get('cover')

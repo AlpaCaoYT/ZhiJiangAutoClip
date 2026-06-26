@@ -13,12 +13,22 @@ import requests
 
 API_BASE = "https://member.bilibili.com/x/bcut/rubick-interface"
 
-HEADERS = {
-    "User-Agent": "Bilibili/1.0.0 (https://www.bilibili.com)",
-    "Content-Type": "application/json",
-    "Accept": "application/json",
-    "Referer": "https://www.bilibili.com/",
-}
+import random
+
+_UA_LIST = [
+    "Bilibili/1.0.0 (https://www.bilibili.com)",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "bilibili/1.0.0 (iPhone; iOS 16.0; Scale/3.00)",
+]
+
+def _make_headers():
+    return {
+        "User-Agent": random.choice(_UA_LIST),
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "Referer": "https://www.bilibili.com/",
+        "Origin": "https://www.bilibili.com",
+    }
 
 
 class BcutASR:
@@ -90,7 +100,7 @@ class BcutASR:
                 "ResourceFileType": "mp3",
                 "model_id": "8",
             },
-            headers=HEADERS,
+            headers=_make_headers(),
             timeout=30,
         )
         resp.raise_for_status()
@@ -113,7 +123,7 @@ class BcutASR:
                 "resource_id": self._resource_id,
                 "upload_id": self._upload_id,
             },
-            headers=HEADERS,
+            headers=_make_headers(),
             timeout=30,
         )
         resp.raise_for_status()
@@ -122,7 +132,7 @@ class BcutASR:
         resp = requests.post(
             f"{API_BASE}/task",
             json={"resource_id": self._resource_id},
-            headers=HEADERS,
+            headers=_make_headers(),
             timeout=30,
         )
         resp.raise_for_status()
@@ -133,7 +143,7 @@ class BcutASR:
             resp = requests.post(
                 f"{API_BASE}/task/result",
                 json={"task_id": self._task_id},
-                headers=HEADERS,
+                headers=_make_headers(),
                 timeout=30,
             )
             resp.raise_for_status()

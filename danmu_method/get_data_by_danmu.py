@@ -302,24 +302,30 @@ class DanmakuAnalyzer:
             weight = self.get_danmaku_weight(danmaku['text'])
             raw_score[t] += weight
             raw_count[t] += 1
-            
+
         if not raw_score: return {}, {}
         max_time = max(raw_score.keys())
         min_time = min(raw_score.keys())
         window_size = AnalyzeConfig.WINDOW_SIZE
         score_map = {}
         count_map = {}
+
+        # 滑动窗口 O(n)：初始化第一个窗口
+        curr_score = sum(raw_score.get(min_time + i, 0) for i in range(window_size))
+        curr_count = sum(raw_count.get(min_time + i, 0) for i in range(window_size))
+
         for t in range(min_time, max_time + 1):
-            curr_score = 0
-            curr_count = 0
-            for i in range(window_size):
-                if (t + i) in raw_score:
-                    curr_score += raw_score[t + i]
-                    curr_count += raw_count[t + i]
             if curr_score > 0:
                 score_map[t] = curr_score
                 count_map[t] = curr_count
-        
+            # 滑动：减去离开窗口的秒，加上进入窗口的秒
+            out_t = t
+            in_t = t + window_size
+            curr_score -= raw_score.get(out_t, 0)
+            curr_count -= raw_count.get(out_t, 0)
+            curr_score += raw_score.get(in_t, 0)
+            curr_count += raw_count.get(in_t, 0)
+
         print(f"✓ 计算密度: 窗口大小={window_size}秒, 有效时间点={len(score_map)}")
         return score_map, count_map
 
