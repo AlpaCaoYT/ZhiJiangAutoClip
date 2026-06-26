@@ -22,13 +22,18 @@ _UA_LIST = [
 ]
 
 def _make_headers():
-    return {
+    headers = {
         "User-Agent": random.choice(_UA_LIST),
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Referer": "https://www.bilibili.com/",
         "Origin": "https://www.bilibili.com",
     }
+    # 尝试传递 B站 Cookie（需登录态）
+    sessdata = os.environ.get("BILIBILI_SESSDATA", "").strip()
+    if sessdata:
+        headers["Cookie"] = f"SESSDATA={sessdata}"
+    return headers
 
 
 class BcutASR:
@@ -104,7 +109,10 @@ class BcutASR:
             timeout=30,
         )
         resp.raise_for_status()
-        data = resp.json()["data"]
+        resp_json = resp.json()
+        if "data" not in resp_json:
+            raise RuntimeError(f"B站API返回异常 (缺少data字段): {str(resp_json)[:200]}")
+        data = resp_json["data"]
         self._resource_id = data["resource_id"]
         self._upload_id = data["upload_id"]
         self._upload_urls = data["upload_urls"]
