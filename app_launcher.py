@@ -217,31 +217,40 @@ class AppLauncher(TkinterDnD.Tk):
                        "4. 找到 SESSDATA，复制值\n\n"
                        "不填也能正常下载普通视频。")).pack(side=tk.LEFT, padx=(4, 0))
 
-        # 输入目录 — 下拉框独占一行
+        # 输入目录
         in_top = ttk.Frame(paths_box)
         in_top.grid(row=row_idx, column=0, sticky="ew", pady=3); row_idx += 1
-        ttk.Label(in_top, text="输入目录", width=8).pack(side=tk.LEFT)
+        ttk.Label(in_top, text="素材目录", width=8).pack(side=tk.LEFT)
         self._input_display_var = tk.StringVar()
         self.input_combo = ttk.Combobox(in_top, textvariable=self._input_display_var, state="readonly")
         self.input_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.input_combo.bind("<<ComboboxSelected>>", self._on_combo_select)
 
-        # 按钮单独一行
         in_btns = ttk.Frame(paths_box)
         in_btns.grid(row=row_idx, column=0, sticky="ew", pady=(0, 3)); row_idx += 1
         ttk.Button(in_btns, text="浏览文件夹", command=self.choose_input_dir).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(in_btns, text="刷新列表", command=self._refresh_input_list).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(in_btns, text="刷新", command=self._refresh_input_list).pack(side=tk.LEFT, padx=(0, 6))
         self._combo_count_label = ttk.Label(in_btns, text="", foreground="#888")
         self._combo_count_label.pack(side=tk.LEFT)
         self._refresh_input_list()
 
-        # 输出目录
-        self._row_with_browse(paths_box, "输出目录", self.output_dir_var, self.choose_output_dir, row_idx); row_idx += 1
+        # 视频选择
+        vid_row = ttk.Frame(paths_box)
+        vid_row.grid(row=row_idx, column=0, sticky="ew", pady=3); row_idx += 1
+        ttk.Label(vid_row, text="选中视频", width=8).pack(side=tk.LEFT)
+        self._video_var = tk.StringVar()
+        self._video_combo = ttk.Combobox(vid_row, textvariable=self._video_var, state="readonly")
+        self._video_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._video_combo.bind("<<ComboboxSelected>>", self._on_video_select)
+        self._video_list = []  # [(path, display_name)]
 
-        # 素材识别预览
-        self._video_preview_label = ttk.Label(paths_box, text="", foreground="#888",
+        # 素材预览
+        self._video_preview_label = ttk.Label(paths_box, text="", foreground="#4a4",
                                                font=("Microsoft YaHei UI", 8))
         self._video_preview_label.grid(row=row_idx, column=0, sticky="ew", pady=(0, 0)); row_idx += 1
+
+        # 输出目录
+        self._row_with_browse(paths_box, "输出目录", self.output_dir_var, self.choose_output_dir, row_idx); row_idx += 1
 
         # 文件拖放区
         self.drop_frame = tk.Frame(paths_box, bg="#1e1e1e", height=52, relief=tk.GROOVE, bd=1)
@@ -464,16 +473,15 @@ class AppLauncher(TkinterDnD.Tk):
         # 输入目录
         input_path = Path(self.input_dir_var.get())
         if input_path.exists():
-            media = list(input_path.glob("*"))
-            videos = [f for f in media if f.suffix.lower() in {".mp4", ".flv", ".mkv", ".mov", ".ts"}]
-            srts = [f for f in media if f.suffix.lower() == ".srt"]
-            ass = [f for f in media if f.suffix.lower() == ".ass"]
+            videos = sorted(
+                [f for f in input_path.rglob("*") if f.suffix.lower() in {".mp4", ".flv", ".mkv", ".mov", ".ts"}],
+                key=lambda f: f.stat().st_size, reverse=True
+            )
+            srts = [f for f in input_path.rglob("*.srt")]
+            ass = [f for f in input_path.rglob("*.ass")]
 
             parts = []
-            main_video = None
             if videos:
-                videos.sort(key=lambda f: f.stat().st_size, reverse=True)
-                main_video = videos[0]
                 parts.append(f"视频({len(videos)}个)")
             if srts:
                 parts.append(f"字幕({len(srts)}个)")
@@ -481,19 +489,24 @@ class AppLauncher(TkinterDnD.Tk):
                 parts.append(f"弹幕({len(ass)}个)")
 
             if parts:
-                self.input_label.config(text=f"输入目录: {'，'.join(parts)}", foreground="#4a4")
+                self.input_label.config(text=f"素材目录: {'，'.join(parts)}", foreground="#4a4")
             else:
-                self.input_label.config(text="输入目录: 空（请放入素材）", foreground="#c90")
+                self.input_label.config(text="素材目录: 空（请放入素材）", foreground="#c90")
 
-            # 更新视频预览 → 输出文件夹名
-            if main_video:
-                from core.file_utils import sanitize_filename
-                safe_name = sanitize_filename(main_video.stem)
-                self._video_preview_label.config(
-                    text=f"素材: {main_video.name} → 输出到: {self.output_dir_var.get().rstrip('/')}/{safe_name}/",
-                    foreground="#4a4")
+            # 填充视频选择下拉框
+            self._video_list = []
+            for v in videos:
+                size_mb = v.stat().st_size / (1024 * 1024)
+                label = f"{v.name}  ({size_mb:.0f} MB)"
+                self._video_list.append((str(v), label))
+            self._video_combo["values"] = [label for _, label in self._video_list]
+            if self._video_list:
+                self._video_combo.current(0)
+                self._on_video_select()
             else:
-                self._video_preview_label.config(text="素材: 未检测到视频文件", foreground="#888")
+                self._video_var.set("")
+                self._video_combo["values"] = ["(未检测到视频)"]
+                self._video_preview_label.config(text="未检测到视频文件", foreground="#888")
         else:
             self.input_label.config(text="输入目录: 不存在", foreground="#e44")
 
@@ -720,6 +733,33 @@ class AppLauncher(TkinterDnD.Tk):
             self.input_dir_var.set(full)
             self._input_display_var.set(name)
             self._check_environment()
+
+    def _on_video_select(self, event=None):
+        """用户选择了视频文件"""
+        sel = self._video_var.get()
+        for path, display in self._video_list:
+            if display == sel:
+                from core.file_utils import sanitize_filename
+                safe = sanitize_filename(Path(path).stem)
+                out_base = self.output_dir_var.get().rstrip("/")
+                self._video_preview_label.config(
+                    text=f"→ 输出: {out_base}/{safe}/", foreground="#4a4")
+                break
+
+    def _get_selected_video(self):
+        """返回用户选择的视频文件路径，未选择则返回最大的视频"""
+        sel = self._video_var.get()
+        for path, display in self._video_list:
+            if display == sel:
+                return Path(path)
+        # 未选择：回退最大视频
+        target = self.input_dir_var.get().strip()
+        video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
+        videos = sorted(
+            [f for f in Path(target).rglob("*") if f.suffix.lower() in video_exts],
+            key=lambda f: f.stat().st_size, reverse=True
+        )
+        return videos[0] if videos else None
 
     def choose_input_dir(self):
         path = filedialog.askdirectory(initialdir=self.input_dir_var.get() or str(DEFAULT_INPUT_DIR))
@@ -1406,17 +1446,11 @@ class AppLauncher(TkinterDnD.Tk):
         return len(ass_files) > 0
 
     def _generate_srt_for_video(self):
-        """用 ASR 为视频生成 SRT 字幕：优先必剪免费，失败回退 Whisper API"""
+        """用 ASR 为选中视频生成 SRT 字幕"""
         target = self.input_dir_var.get().strip()
-        video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
-        videos = [f for f in Path(target).rglob("*") if f.suffix.lower() in video_exts]
-        if not videos:
-            raise RuntimeError(f"在 {target} 中未找到视频文件（支持: {', '.join(sorted(video_exts))}）")
-        # 优先选最大的视频文件（通常是最完整的录播）
-        videos.sort(key=lambda f: f.stat().st_size, reverse=True)
-        video = videos[0]
-        size_mb = video.stat().st_size / (1024 * 1024)
-        self.log(f"  找到 {len(videos)} 个视频，选用: {video.name} ({size_mb:.0f} MB)")
+        video = self._get_selected_video()
+        if not video:
+            raise RuntimeError(f"在 {target} 中未找到视频文件")
 
         # 三级 ASR 链路：必剪(免费) → 本地Whisper(免费) → Whisper API(需Key)
         from utils.local_asr import auto_generate_srt_robust
