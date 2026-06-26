@@ -139,7 +139,7 @@ def auto_generate_srt_robust(video_path, output_dir=None):
     # [3] 本地 faster-whisper (通用方案)
     try:
         print("  [3/4] 回退到本地 faster-whisper...")
-        return transcribe_local(video_path, output_dir, model_size="small")
+        return transcribe_local(video_path, output_dir, model_size="tiny")
     except Exception as e:
         print(f"  faster-whisper 失败: {e}")
 

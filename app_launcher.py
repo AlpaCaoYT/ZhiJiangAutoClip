@@ -1758,6 +1758,16 @@ class AppLauncher(TkinterDnD.Tk):
         from utils.local_asr import auto_generate_srt_robust
         srt_path = auto_generate_srt_robust(str(video), output_dir)
         self.log(f"  字幕已生成: {Path(srt_path).name}")
+
+        # 快速LLM校核（有Key时自动跑，1次API调用不慢）
+        if self.api_key_var.get().strip():
+            try:
+                self.log("  LLM 快速校核字幕...")
+                from utils.llm_asr_corrector import quick_llm_correct
+                quick_llm_correct(str(srt_path))
+            except Exception as e:
+                self.log(f"  LLM 校核跳过: {e}")
+
         self._check_environment()
 
     def _step1_func(self):
