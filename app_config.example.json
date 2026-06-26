@@ -1,0 +1,18 @@
+{
+  "input_dir": "./workspace/video_input",
+  "output_dir": "./workspace/clip_output",
+  "api_key": "",
+  "api_base": "https://api.deepseek.com/chat/completions",
+  "api_model": "deepseek-v4-pro",
+  "bvid": "",
+  "sessdata": "",
+  "member_status": {
+    "嘉然": true,
+    "贝拉": true,
+    "乃琳": true,
+    "心宜": true,
+    "思诺": true
+  },
+  "cover_style": "style1",
+  "cover_count": 5
+}
