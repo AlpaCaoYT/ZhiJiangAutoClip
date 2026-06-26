@@ -114,9 +114,14 @@ ZhiJiangAutoClip/
 ## 常见问题
 
 ### FFmpeg 被杀毒软件拦截
-生成视频时 FFmpeg 通过子进程操作视频文件，Windows Defender 等杀毒软件可能误报。这是**正常现象**，不是病毒。
-- **解决方法**：在杀毒软件中将项目文件夹添加为例外/白名单
-- 如果只有警告没有拦截，直接忽略即可
+生成视频时 FFmpeg 通过子进程操作视频文件，Windows Defender 检测到 `bat → python → ffmpeg.exe` 调用链后会误判为风险程序。这是**正常现象**，不是病毒。
+
+**永久解决**（以管理员身份运行 PowerShell）：
+```powershell
+Add-MpPreference -ExclusionPath "G:\ai切片\ASoulAutoClip-main"
+Add-MpPreference -ExclusionPath "G:\ffmpeg-7.1.1-essentials_build\bin"
+```
+路径改成你自己的实际路径。这是 Windows Defender 的标准白名单功能，安全无风险。
 
 ### 字幕下载/生成失败
 优先尝试必剪免费 ASR（无需 Key），失败后自动回退 Whisper API（需在高级配置中填写 STT 接口）。

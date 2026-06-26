@@ -392,8 +392,17 @@ class AppLauncher(TkinterDnD.Tk):
         self.save_hint = ttk.Label(save_frame, text="", foreground="#888")
         self.save_hint.pack(side=tk.LEFT)
 
+        ffmpeg_path = shutil.which("ffmpeg") or ""
         self.log("准备就绪。按照 1→2→3→4 的顺序点击即可。\n"
-                 "或者直接点「一键运行全部流程」.");
+                 "或者直接点「一键运行全部流程」。\n"
+                 "\n"
+                 "=== 防杀毒误报提示 ===\n"
+                 "生成视频时 FFmpeg 可能被杀毒软件拦截（误判为风险程序）。\n"
+                 f"FFmpeg 路径: {ffmpeg_path}\n"
+                 "解决方法: 以管理员身份运行 PowerShell，执行：\n"
+                 f'  Add-MpPreference -ExclusionPath "{PROJECT_ROOT}"\n'
+                 f'  Add-MpPreference -ExclusionPath "{Path(ffmpeg_path).parent if ffmpeg_path else "C:\\ffmpeg\\bin"}"\n'
+                 "这是 Windows Defender 的标准白名单操作，安全无风险。");
 
     def _row_with_browse(self, parent, label, variable, command, row):
         frame = ttk.Frame(parent)
