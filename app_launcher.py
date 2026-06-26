@@ -1954,9 +1954,13 @@ class AppLauncher(TkinterDnD.Tk):
                         self._mark_step(num, "run")
                         if num == 1:
                             self._step1_func()
+                            # 下载完成后刷新文件状态（弹幕/字幕路径可能已变化）
+                            self._apply_env()
                         elif num == 2:
                             from utils.ASRCorrector import FileBasedCorrector
-                            FileBasedCorrector().process_folder(self.input_dir_var.get().strip())
+                            target = self.input_dir_var.get().strip()
+                            # 用实际目录而非 __no_danmaku__（此时文件已到位）
+                            FileBasedCorrector().process_folder(target)
                             # LLM 智能纠错改为手动触发（高级配置按钮），自动流程太慢
                         elif num == 3:
                             from danmu_method.get_data_by_danmu import DanmakuAnalyzer

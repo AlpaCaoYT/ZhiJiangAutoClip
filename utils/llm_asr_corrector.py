@@ -196,11 +196,11 @@ def quick_llm_correct(srt_path):
     if len(content) < 50:
         return srt_path
 
-    # 只提交文字部分，限制长度
+    # 只提交文字部分，限制长度提高行数匹配率
     lines = [l.strip() for l in content.split("\n") if l.strip() and "-->" not in l and not l.strip().isdigit()]
     text_only = "\n".join(lines)
-    if len(text_only) > 3000:
-        text_only = text_only[:3000] + "\n...(省略)"
+    if len(text_only) > 6000:
+        text_only = text_only[:6000]
 
     prompt = f"""请快速校核以下 ASR 字幕中的**成员名、粉丝名、CP名、圈内术语**的错误。
 只修正明显的同音字/近音字错误（如 斯诺→思诺、心仪→心宜、乃贝→乃贝 等）。
@@ -229,14 +229,17 @@ CP：乃贝、琳嘉女孩、超级嘉贝、小心思
             # 简单替换：逐行映射回原文（保持时间戳不变）
             orig_texts = [l for l in content.split("\n") if l.strip() and "-->" not in l and not l.strip().isdigit()]
             corr_texts = [l for l in corrected.split("\n") if l.strip()]
-            if len(corr_texts) >= len(orig_texts) * 0.8:  # 行数基本匹配才替换
-                result = content
-                for i in range(min(len(orig_texts), len(corr_texts))):
-                    if orig_texts[i] != corr_texts[i] and len(corr_texts[i]) > 1:
-                        result = result.replace(orig_texts[i], corr_texts[i], 1)
+            # 逐行替换（行数不严格要求匹配）
+            fixed = 0
+            result = content
+            for i in range(min(len(orig_texts), len(corr_texts))):
+                if orig_texts[i] != corr_texts[i] and len(corr_texts[i]) > 1:
+                    result = result.replace(orig_texts[i], corr_texts[i], 1)
+                    fixed += 1
+            if fixed > 0:
                 with open(srt_path, "w", encoding="utf-8-sig") as f:
                     f.write(result)
-                print(f"  LLM 快速校核完成")
+                print(f"  LLM 校核: 修正 {fixed} 处")
                 return srt_path
         print(f"  LLM 校核跳过 (API {resp.status_code})")
     except Exception as e:
