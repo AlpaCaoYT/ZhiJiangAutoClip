@@ -230,6 +230,11 @@ class AppLauncher(TkinterDnD.Tk):
         # 输出目录
         self._row_with_browse(paths_box, "输出目录", self.output_dir_var, self.choose_output_dir, row_idx); row_idx += 1
 
+        # 素材识别预览
+        self._video_preview_label = ttk.Label(paths_box, text="", foreground="#888",
+                                               font=("Microsoft YaHei UI", 8))
+        self._video_preview_label.grid(row=row_idx, column=0, sticky="ew", pady=(0, 0)); row_idx += 1
+
         # 文件拖放区
         self.drop_frame = tk.Frame(paths_box, bg="#1e1e1e", height=52, relief=tk.GROOVE, bd=1)
         self.drop_frame.grid(row=row_idx, column=0, sticky="ew", pady=(6, 0)); row_idx += 1
@@ -450,7 +455,10 @@ class AppLauncher(TkinterDnD.Tk):
             ass = [f for f in media if f.suffix.lower() == ".ass"]
 
             parts = []
+            main_video = None
             if videos:
+                videos.sort(key=lambda f: f.stat().st_size, reverse=True)
+                main_video = videos[0]
                 parts.append(f"视频({len(videos)}个)")
             if srts:
                 parts.append(f"字幕({len(srts)}个)")
@@ -461,6 +469,16 @@ class AppLauncher(TkinterDnD.Tk):
                 self.input_label.config(text=f"输入目录: {'，'.join(parts)}", foreground="#4a4")
             else:
                 self.input_label.config(text="输入目录: 空（请放入素材）", foreground="#c90")
+
+            # 更新视频预览 → 输出文件夹名
+            if main_video:
+                from core.file_utils import sanitize_filename
+                safe_name = sanitize_filename(main_video.stem)
+                self._video_preview_label.config(
+                    text=f"素材: {main_video.name} → 输出到: {self.output_dir_var.get().rstrip('/')}/{safe_name}/",
+                    foreground="#4a4")
+            else:
+                self._video_preview_label.config(text="素材: 未检测到视频文件", foreground="#888")
         else:
             self.input_label.config(text="输入目录: 不存在", foreground="#e44")
 

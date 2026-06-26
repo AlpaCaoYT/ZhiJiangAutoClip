@@ -289,7 +289,10 @@ def main():
     CONFIG['srt_file'] = srt_file
 
     # ================= 自动更新输出路径 =================
-    folder_name = os.path.basename(os.path.normpath(input_dir))
+    # 用视频文件名（去特殊字符）作为输出文件夹名，比用输入目录名更清晰
+    from core.file_utils import sanitize_filename
+    video_stem = Path(video_file).stem
+    folder_name = sanitize_filename(video_stem)
     CONFIG['output_dir'] = os.path.join(CONFIG['output_dir'], folder_name)
 
     # ----------------- 清理逻辑 -----------------
