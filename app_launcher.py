@@ -354,13 +354,14 @@ class AppLauncher(TkinterDnD.Tk):
         self._cover_hint.pack(side=tk.LEFT, padx=(12, 0))
         self._update_cover_hint()
 
-        # 配置文件编辑
-        edit_box = ttk.LabelFrame(self.advanced_frame, text="配置编辑", padding=10)
+        # 配置编辑 & 工具
+        edit_box = ttk.LabelFrame(self.advanced_frame, text="配置编辑 & 工具", padding=10)
         edit_box.pack(fill=tk.X, pady=(0, 8))
         edit_row = ttk.Frame(edit_box)
         edit_row.pack(fill=tk.X)
         ttk.Button(edit_row, text="编辑提示词模板", command=self._edit_prompt).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(edit_row, text="编辑纠错字典", command=self._edit_dict).pack(side=tk.LEFT)
+        ttk.Button(edit_row, text="编辑纠错字典", command=self._edit_dict).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(edit_row, text="LLM智能纠错字幕", command=self.run_llm_corrector).pack(side=tk.LEFT)
 
         # 保存按钮
         save_frame = ttk.Frame(self.advanced_frame)
@@ -1131,6 +1132,25 @@ class AppLauncher(TkinterDnD.Tk):
 
         self._run_worker("字幕纠错", task)
 
+    def run_llm_corrector(self):
+        """LLM 智能字幕纠错：用大模型修正 ASR 识别错误（需 API Key）"""
+        def task():
+            self._apply_env()
+            from utils.llm_asr_corrector import llm_correct_folder
+            target = self.input_dir_var.get().strip()
+            if not os.path.isdir(target):
+                self.log(f"  ⚠ 输入目录不存在: {target}")
+                return
+            api_key = self.api_key_var.get().strip()
+            if not api_key:
+                self.log("  ⚠ 未配置 API Key，LLM 纠错不可用。请先在高级配置中填写。")
+                messagebox.showwarning("缺少 API Key", "LLM 智能纠错需要 DeepSeek API Key。\n请展开高级配置 → AI 接口配置中填写。")
+                return
+            llm_correct_folder(target)
+            self.log("  LLM 智能纠错完成 ✓")
+
+        self._run_worker("LLM智能字幕纠错", task)
+
     def run_danmaku_meta(self):
         def task():
             self._apply_env()
@@ -1337,6 +1357,14 @@ class AppLauncher(TkinterDnD.Tk):
                         elif num == 2:
                             from utils.ASRCorrector import FileBasedCorrector
                             FileBasedCorrector().process_folder(self.input_dir_var.get().strip())
+                            # 字典纠错后自动跑 LLM 智能纠错（有 API Key 时）
+                            if self.api_key_var.get().strip():
+                                try:
+                                    from utils.llm_asr_corrector import llm_correct_folder
+                                    self.log("  自动运行 LLM 智能纠错...")
+                                    llm_correct_folder(self.input_dir_var.get().strip())
+                                except Exception as e:
+                                    self.log(f"  LLM 纠错跳过: {e}")
                         elif num == 3:
                             from danmu_method.get_data_by_danmu import DanmakuAnalyzer
                             analyzer = DanmakuAnalyzer()
