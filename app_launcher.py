@@ -230,6 +230,7 @@ class AppLauncher(TkinterDnD.Tk):
         in_btns.grid(row=row_idx, column=0, sticky="ew", pady=(0, 3)); row_idx += 1
         ttk.Button(in_btns, text="浏览文件夹", command=self.choose_input_dir).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(in_btns, text="刷新", command=self._refresh_input_list).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(in_btns, text="整理文件", command=self._organize_files).pack(side=tk.LEFT, padx=(0, 6))
         self._combo_count_label = ttk.Label(in_btns, text="", foreground="#888")
         self._combo_count_label.pack(side=tk.LEFT)
         self._refresh_input_list()
@@ -783,6 +784,87 @@ class AppLauncher(TkinterDnD.Tk):
             self._input_display_var.set(first_name)
             self.input_dir_var.set(self._input_dirs[first_name])
 
+    def _organize_files(self):
+        """智能整理：按成员/CP/团播 + 日期自动归类到子文件夹"""
+        base = Path(self.input_dir_var.get())
+        if not base.exists():
+            return
+
+        video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
+        from core.file_utils import sanitize_filename
+        import re
+
+        # 收集所有视频（排除已在子文件夹中的）
+        all_videos = [f for f in base.rglob("*") if f.suffix.lower() in video_exts and f.parent == base]
+
+        if not all_videos:
+            self.log("  没有需要整理的文件（视频已在子文件夹中）")
+            self._refresh_input_list()
+            self._check_environment()
+            return
+
+        # 判断分类
+        active = [n for n, v in self._member_vars.items() if v.get()]
+        aso_set = {"嘉然", "贝拉", "乃琳"}
+        active_aso = [n for n in active if n in aso_set]
+        active_ss = [n for n in active if n not in aso_set]
+
+        if len(active) == 1:
+            category = active[0]
+        elif set(active) == {"心宜", "思诺"}:
+            category = "小心思"
+        elif len(active) == 2 and all(n in aso_set for n in active):
+            category = f"{'×'.join(sorted(active))}"
+        elif len(active_aso) >= 2 and not active_ss:
+            category = "ASOUL团播"
+        elif active_ss and active_aso:
+            category = "枝江团播"
+        elif active_ss:
+            category = "闪耀舞台"
+        else:
+            category = "其他"
+
+        moved = 0
+        for video in all_videos:
+            name = video.stem
+            # 尝试提取日期 (B站格式: 2025年6月26日 或 2025-06-26 或 6月26日)
+            date_match = re.search(r'(\d{4})[年-](\d{1,2})[月-](\d{1,2})日?', name)
+            if date_match:
+                y, m, d = date_match.groups()
+                date_str = f"{m}月{d}日"
+            else:
+                # 用文件修改时间
+                import datetime
+                ts = video.stat().st_mtime
+                dt = datetime.datetime.fromtimestamp(ts)
+                date_str = f"{dt.month}月{dt.day}日"
+
+            # 保留视频名中有意义的部分
+            short_name = sanitize_filename(name)
+            if len(short_name) > 20:
+                short_name = short_name[:20]
+
+            folder_name = f"{date_str} {short_name}"
+            target_dir = base / category / folder_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            # 移动视频
+            dest = target_dir / video.name
+            if video != dest:
+                shutil.move(str(video), str(dest))
+                moved += 1
+
+            # 移动同名 SRT/ASS
+            for ext in [".srt", ".ass"]:
+                src = base / f"{name}{ext}"
+                if src.exists():
+                    dst = target_dir / f"{name}{ext}"
+                    shutil.move(str(src), str(dst))
+
+        self.log(f"  文件整理完成: {moved} 个视频归入 {category}/ 子文件夹")
+        self._refresh_input_list()
+        self._check_environment()
+
     def _on_combo_select(self, event=None):
         name = self.input_combo.get()
         full = self._input_dirs.get(name)
@@ -792,15 +874,25 @@ class AppLauncher(TkinterDnD.Tk):
             self._check_environment()
 
     def _on_video_select(self, event=None):
-        """用户选择了视频文件"""
+        """用户选择了视频文件 → 更新输出预览"""
         sel = self._video_var.get()
         for path, display in self._video_list:
             if display == sel:
                 from core.file_utils import sanitize_filename
-                safe = sanitize_filename(Path(path).stem)
+                p = Path(path)
+                # 构建输出路径：镜像输入子文件夹结构
+                base_input = Path(self.input_dir_var.get())
+                try:
+                    rel = p.parent.relative_to(base_input)
+                except ValueError:
+                    rel = Path(".")
                 out_base = self.output_dir_var.get().rstrip("/")
+                if str(rel) != ".":
+                    out_path = f"{out_base}/{rel}/{sanitize_filename(p.stem)}/"
+                else:
+                    out_path = f"{out_base}/{sanitize_filename(p.stem)}/"
                 self._video_preview_label.config(
-                    text=f"→ 输出: {out_base}/{safe}/", foreground="#4a4")
+                    text=f"→ 输出: {out_path}", foreground="#4a4")
                 break
 
     def _get_selected_video(self):
@@ -871,6 +963,7 @@ class AppLauncher(TkinterDnD.Tk):
             self.drop_label.config(text=f"已导入 {copied} 个文件 ✓", fg="#4a4")
             self.after(3000, lambda: self.drop_label.config(
                 text="将视频/字幕/弹幕文件拖放到这里（自动复制到输入目录）", fg="#777"))
+            self._organize_files()
             self._check_environment()
 
     def choose_output_dir(self):
@@ -1392,6 +1485,7 @@ class AppLauncher(TkinterDnD.Tk):
                 except Exception as e:
                     self.log(f"  弹幕备用下载也失败: {e}")
 
+            self._organize_files()
             self._mark_step(1, "done")
 
         self._run_worker("BV下载", task)

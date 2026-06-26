@@ -289,11 +289,20 @@ def main():
     CONFIG['srt_file'] = srt_file
 
     # ================= 自动更新输出路径 =================
-    # 用视频文件名（去特殊字符）作为输出文件夹名，比用输入目录名更清晰
+    # 镜像输入目录的子文件夹结构（如 心宜/6月26日xxx/ → clip_output/心宜/6月26日xxx/）
     from core.file_utils import sanitize_filename
-    video_stem = Path(video_file).stem
+    video_path = Path(video_file)
+    input_base = Path(input_dir)
+    try:
+        rel_dir = video_path.parent.relative_to(input_base)
+    except ValueError:
+        rel_dir = Path(".")
+    video_stem = video_path.stem
     folder_name = sanitize_filename(video_stem)
-    CONFIG['output_dir'] = os.path.join(CONFIG['output_dir'], folder_name)
+    if str(rel_dir) != ".":
+        CONFIG['output_dir'] = os.path.join(CONFIG['output_dir'], str(rel_dir), folder_name)
+    else:
+        CONFIG['output_dir'] = os.path.join(CONFIG['output_dir'], folder_name)
 
     # ----------------- 清理逻辑 -----------------
     output_path_obj = Path(CONFIG['output_dir'])
