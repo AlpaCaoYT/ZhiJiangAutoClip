@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File "G:\ai切片\ASoulAutoClip-main\app_launcher.py", line 2249, in <module>
+    main()
+    ~~~~^^
+  File "G:\ai切片\ASoulAutoClip-main\app_launcher.py", line 2239, in main
+    app = AppLauncher()
+  File "G:\ai切片\ASoulAutoClip-main\app_launcher.py", line 162, in __init__
+    self._build_ui()
+    ~~~~~~~~~~~~~~^^
+  File "G:\ai切片\ASoulAutoClip-main\app_launcher.py", line 417, in _build_ui
+    self._pause_var = tk.BooleanVar(value=saved.get("pause_after_analysis", False))
+                                          ^^^^^
+NameError: name 'saved' is not defined

@@ -159,6 +159,12 @@ class AppLauncher(TkinterDnD.Tk):
         # 本地 Whisper 模型选择
         self._whisper_model_var = tk.StringVar(value=saved.get("whisper_model", "small"))
 
+        # 分析后暂停
+        self._pause_var = tk.BooleanVar(value=saved.get("pause_after_analysis", False))
+
+        # 分析模式
+        self._analysis_mode = tk.StringVar(value=saved.get("analysis_mode", "fuzzy"))
+
         self._build_ui()
         self._check_environment()
 
@@ -414,13 +420,12 @@ class AppLauncher(TkinterDnD.Tk):
         self._auto_cb = ttk.Checkbutton(auto_row, text="全自动模式（出错自动跳过，不弹窗询问）",
                                          variable=self._auto_mode)
         self._auto_cb.pack(side=tk.LEFT)
-        self._pause_var = tk.BooleanVar(value=saved.get("pause_after_analysis", False))
         self._pause_cb = ttk.Checkbutton(auto_row, text="分析后暂停校核（第3步后暂停，校核后再生成切片）",
                                           variable=self._pause_var)
         self._pause_cb.pack(side=tk.LEFT, padx=(16, 0))
 
-        # 分析模式选择
-        self._analysis_mode = tk.StringVar(value=saved.get("analysis_mode", "fuzzy"))
+        # 分析模式选择（变量在 __init__ 已创建）
+        # 注意: self._analysis_mode 已在 __init__ 中定义
         mode_row = ttk.Frame(actions)
         mode_row.pack(fill=tk.X, pady=(4, 2))
         ttk.Label(mode_row, text="分析模式:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
