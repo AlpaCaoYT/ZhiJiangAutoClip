@@ -198,10 +198,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 start_str = SubtitleUtils.sec_to_ass_time(rel_start)
                 end_str = SubtitleUtils.sec_to_ass_time(rel_end)
                 
-                wrapped_text = SubtitleUtils.auto_wrap_text(sub['text'], max_len=max_char_len)
+                raw_text = sub['text']
+                style = "Default"
+                # 检测 [发言人] 标签，应用成员专属样式
+                import re as _re
+                speaker_match = _re.match(r'\[(嘉然|贝拉|乃琳|心宜|思诺)\]\s*', raw_text)
+                if speaker_match:
+                    style = speaker_match.group(1)
+                    raw_text = raw_text[speaker_match.end():]
+                wrapped_text = SubtitleUtils.auto_wrap_text(raw_text, max_len=max_char_len)
                 text = wrapped_text.replace('\n', '\\N')
-                
-                events.append(f"Dialogue: 0,{start_str},{end_str},Default,,0,0,0,,{text}")
+
+                events.append(f"Dialogue: 0,{start_str},{end_str},{style},,0,0,0,,{text}")
                 valid_count += 1
         
         with open(output_path, 'w', encoding='utf-8-sig') as f:

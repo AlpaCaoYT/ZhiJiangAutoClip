@@ -386,6 +386,8 @@ class AppLauncher(TkinterDnD.Tk):
         self._edit_btn = ttk.Button(flow_bottom, text="编辑切片数据",
                                      command=self._edit_data_source)
         self._edit_btn.pack(side=tk.RIGHT, padx=(4, 0))
+        ttk.Button(flow_bottom, text="字幕发言人",
+                   command=self._edit_subtitle_speakers).pack(side=tk.RIGHT, padx=4)
 
         # 配置行：切片数量 + 封面风格
         clip_cfg = ttk.Frame(actions)
@@ -409,6 +411,16 @@ class AppLauncher(TkinterDnD.Tk):
         self._pause_cb = ttk.Checkbutton(auto_row, text="分析后暂停校核（第3步后暂停，校核后再生成切片）",
                                           variable=self._pause_var)
         self._pause_cb.pack(side=tk.LEFT, padx=(16, 0))
+
+        # 分析模式选择
+        self._analysis_mode = tk.StringVar(value=saved.get("analysis_mode", "fuzzy"))
+        mode_row = ttk.Frame(actions)
+        mode_row.pack(fill=tk.X, pady=(4, 2))
+        ttk.Label(mode_row, text="分析模式:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
+        ttk.Radiobutton(mode_row, text="模式1 模糊（不推测发言人）", variable=self._analysis_mode,
+                        value="fuzzy").pack(side=tk.LEFT, padx=(4, 12))
+        ttk.Radiobutton(mode_row, text="模式2 精确（人工指定发言人后再分析）", variable=self._analysis_mode,
+                        value="precise").pack(side=tk.LEFT)
 
         # 快捷工具
         util_row = ttk.Frame(actions)
@@ -746,6 +758,7 @@ class AppLauncher(TkinterDnD.Tk):
                 "whisper_model": self._whisper_model_var.get().strip(),
                 "auto_mode": self._auto_mode.get(),
                 "pause_after_analysis": self._pause_var.get(),
+                "analysis_mode": self._analysis_mode.get(),
             }
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
@@ -1250,6 +1263,136 @@ class AppLauncher(TkinterDnD.Tk):
             self.log(f"[快捷] 打开失败: {e}")
             os.startfile(out_dir)
 
+    def _edit_subtitle_speakers(self):
+        """模式2：字幕发言人编辑器 — 逐条指定发言人 + 编辑文字"""
+        target = self.input_dir_var.get().strip()
+        srts = list(Path(target).rglob("*.srt"))
+        if not srts:
+            messagebox.showinfo("提示", "未找到 SRT 字幕文件")
+            return
+        srt_path = str(srts[0])
+
+        # 解析 SRT
+        with open(srt_path, "r", encoding="utf-8-sig") as f:
+            content = f.read()
+        blocks = content.strip().split("\n\n")
+        entries = []
+        for blk in blocks:
+            lines = blk.strip().split("\n")
+            if len(lines) >= 3:
+                entries.append({
+                    "idx": lines[0], "ts": lines[1],
+                    "text": "\n".join(lines[2:])
+                })
+
+        # 成员颜色
+        colors = {
+            "嘉然": "#FF69B4", "贝拉": "#9B59B6", "乃琳": "#3498DB",
+            "心宜": "#FFD700", "思诺": "#C0C0C0", "未指定": "#888",
+        }
+
+        win = tk.Toplevel(self)
+        win.title("字幕发言人编辑（模式2）")
+        win.geometry("900x650")
+        win.transient(self)
+
+        # 顶部按钮
+        top = ttk.Frame(win, padding=10)
+        top.pack(fill=tk.X)
+        ttk.Label(top, text=f"共 {len(entries)} 条字幕 — 指定发言人后自动应用成员配色",
+                  font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+        batch_var = tk.StringVar()
+        batch_combo = ttk.Combobox(top, textvariable=batch_var,
+                                    values=["批量设置:", "全部→嘉然", "全部→贝拉", "全部→乃琳", "全部→心宜", "全部→思诺"],
+                                    state="readonly", width=15)
+        batch_combo.pack(side=tk.RIGHT, padx=4)
+
+        def _batch_set():
+            sel = batch_var.get()
+            for m in ["嘉然", "贝拉", "乃琳", "心宜", "思诺"]:
+                if m in sel:
+                    for e in entries:
+                        e["speaker"] = m
+                    _refresh_list()
+                    break
+
+        batch_combo.bind("<<ComboboxSelected>>", lambda e: _batch_set())
+
+        # 主区域：Canvas滚动列表
+        canvas = tk.Canvas(win, highlightthickness=0)
+        sb = ttk.Scrollbar(win, orient=tk.VERTICAL, command=canvas.yview)
+        sf = ttk.Frame(canvas)
+        sf.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=sf, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+
+        speaker_vars = []
+        text_vars = []
+
+        def _refresh_list():
+            for w in sf.winfo_children():
+                w.destroy()
+            speaker_vars.clear()
+            text_vars.clear()
+            for i, e in enumerate(entries):
+                row = ttk.Frame(sf)
+                row.pack(fill=tk.X, padx=8, pady=1)
+
+                # 时间戳
+                ts_text = e["ts"].split(" --> ")[0][:8] if "-->" in e["ts"] else e["ts"][:8]
+                ttk.Label(row, text=ts_text, font=("Consolas", 8), width=7).pack(side=tk.LEFT)
+
+                # 发言人下拉
+                sp_var = tk.StringVar(value=e.get("speaker", "未指定"))
+                speaker_vars.append(sp_var)
+                sp_combo = ttk.Combobox(row, textvariable=sp_var,
+                                         values=["未指定", "嘉然", "贝拉", "乃琳", "心宜", "思诺"],
+                                         state="readonly", width=6)
+                sp_combo.pack(side=tk.LEFT, padx=2)
+
+                # 颜色预览
+                color_label = tk.Label(row, text="●", fg=colors.get(sp_var.get(), "#888"),
+                                       font=("Consolas", 10), width=2)
+                color_label.pack(side=tk.LEFT)
+                sp_var.trace_add("write", lambda *a, l=color_label, v=sp_var:
+                    l.configure(fg=colors.get(v.get(), "#888")))
+
+                # 可编辑文字
+                txt_var = tk.StringVar(value=e["text"])
+                text_vars.append(txt_var)
+                txt_entry = ttk.Entry(row, textvariable=txt_var, font=("Microsoft YaHei UI", 9))
+                txt_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+
+        _refresh_list()
+
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
+        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 12), pady=8)
+
+        # 保存按钮
+        btn_row = ttk.Frame(win, padding=10)
+        btn_row.pack(fill=tk.X)
+
+        def _save():
+            # 更新 entries 并写回 SRT
+            for i in range(len(entries)):
+                entries[i]["speaker"] = speaker_vars[i].get()
+                entries[i]["text"] = text_vars[i].get()
+            out_lines = []
+            for i, e in enumerate(entries, 1):
+                out_lines.append(str(i))
+                out_lines.append(e["ts"])
+                sp = e.get("speaker", "未指定")
+                out_lines.append(f"[{sp}] {e['text']}" if sp != "未指定" else e["text"])
+                out_lines.append("")
+            with open(srt_path, "w", encoding="utf-8-sig") as f:
+                f.write("\n".join(out_lines))
+            self.log(f"  发言人标记已保存: {srt_path}")
+            messagebox.showinfo("已保存", f"已保存 {len(entries)} 条字幕的发言人标记")
+            win.destroy()
+
+        ttk.Button(btn_row, text="💾 保存发言人标记", command=_save).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(btn_row, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
     def _edit_data_source(self):
         """打开标题编辑器，修改 Data_source.txt 中各片段的标题、摘要、封面文字"""
         target = self.input_dir_var.get().strip()
@@ -1482,6 +1625,7 @@ class AppLauncher(TkinterDnD.Tk):
         os.environ["STT_BASE_URL"] = self._stt_url_var.get().strip()
         os.environ["STT_MODEL"] = self._stt_model_var.get().strip()
         os.environ["WHISPER_MODEL"] = self._whisper_model_var.get().strip()
+        os.environ["ANALYSIS_MODE"] = self._analysis_mode.get().strip()
         # 终止标志（供 Auto_clip 等长时间运行的模块检查）
         os.environ["AUTOCLIP_STOP"] = "1" if self._stop_requested else "0"
 

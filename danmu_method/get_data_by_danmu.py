@@ -493,7 +493,25 @@ class DanmakuAnalyzer:
             danmaku_text=danmaku_text
         )
 
-        # 根据在场人员给出简短提示，不硬性约束
+        # 分析模式：模糊模式不推测发言人
+        analysis_mode = os.environ.get("ANALYSIS_MODE", "fuzzy")
+        if analysis_mode == "fuzzy" and len(active_members) > 1:
+            prompt += (
+                "\n### ⚠️ 模糊模式（不要推测发言人）\n"
+                "多人对话时ASR无法区分谁在说话，字幕里的\"我\"\"你\"可能张冠李戴。\n"
+                "- 标题和摘要只描述\"发生了什么\"\"说了什么内容\"，不要写\"XX说...\"\n"
+                "- 除非从弹幕内容能明确判断发言人（弹幕刷了具体人名/昵称）\n"
+                "- 不要根据语气/性格推测发言人，宁愿模糊处理\n"
+                "- 例：写\"讨论火锅口味\"而非\"心宜说火锅好吃\"\n"
+            )
+        elif analysis_mode == "precise" and len(active_members) > 1:
+            prompt += (
+                "\n### 精确模式提示\n"
+                "当前出场: " + ", ".join(active_members) + "\n"
+                "根据对话内容和语气推断发言人，但字幕ASR可能张冠李戴，参考弹幕确认。\n"
+            )
+
+        # 根据在场人员给出简短提示
         all_members = {"嘉然", "贝拉", "乃琳", "心宜", "思诺"}
         absent = all_members - active_set
         if absent:
