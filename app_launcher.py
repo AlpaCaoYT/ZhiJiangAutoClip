@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import io
 import json
@@ -97,6 +98,20 @@ def _load_config():
 
 
 class AppLauncher(TkinterDnD.Tk):
+    # 发言人类型及配色
+    SPEAKER_TYPES = [
+        ("未指定", "#888888"),
+        ("嘉然",   "#FF69B4"),
+        ("贝拉",   "#9B59B6"),
+        ("乃琳",   "#3498DB"),
+        ("心宜",   "#FF1493"),
+        ("思诺",   "#EEA0D7"),
+        ("旁白",   "#FFFFFF"),
+        ("一起说", "#FF8C00"),
+        ("ASOUL",  "#006AFF"),
+    ]
+    SPEAKER_COLORS = dict(SPEAKER_TYPES)
+
     def __init__(self):
         super().__init__()
         # 日志文件（必须在 _LogWriter.bind 前创建，防止早期 print 找不到路径）
@@ -140,6 +155,7 @@ class AppLauncher(TkinterDnD.Tk):
         self._step_done = {1: False, 2: False, 3: False, 4: False}
         self._step_widgets = {}
         self._error_count = {}  # 错误分类计数
+        self._converted_srts = set()  # SRT 繁简转换缓存，避免重复处理
 
         # 成员出场标记（默认全部出场）
         saved_members = saved.get("member_status", {})
@@ -190,10 +206,31 @@ class AppLauncher(TkinterDnD.Tk):
         # 日志区 — 固定高度，优先放底部
         log_box = ttk.LabelFrame(outer, text="运行日志", padding=8)
         log_box.pack(fill=tk.X, side=tk.BOTTOM)
-        self.log_text = tk.Text(log_box, height=8, wrap=tk.WORD, relief=tk.FLAT,
+        self.log_text = tk.Text(log_box, height=10, wrap=tk.WORD, relief=tk.FLAT,
                                 bg="#151515", fg="#eaeaea", insertbackground="#ffffff",
-                                font=("Consolas", 10))
+                                font=("Consolas", 11))
         self.log_text.pack(fill=tk.BOTH, expand=True)
+        # 右键菜单 + Ctrl+C 复制
+        def _copy_log():
+            try:
+                if self.log_text.tag_ranges("sel"):
+                    text = self.log_text.selection_get()
+                else:
+                    text = self.log_text.get("1.0", "end-1c")
+                self.clipboard_clear()
+                self.clipboard_append(text)
+            except Exception:
+                pass
+        self._log_menu = tk.Menu(self.log_text, tearoff=0)
+        self._log_menu.add_command(label="复制", command=_copy_log)
+        self._log_menu.add_command(label="全选", command=lambda: (
+            self.log_text.tag_add("sel", "1.0", "end"),
+            self.log_text.mark_set("insert", "1.0"),
+            self.log_text.see("insert"),
+        ))
+        self.log_text.bind("<Button-3>", lambda e: self._log_menu.tk_popup(e.x_root, e.y_root))
+        self.log_text.bind("<Control-c>", lambda e: _copy_log())
+        self.log_text.bind("<Control-C>", lambda e: _copy_log())
 
         # 配置区 — 滚动，占满剩余空间
         canvas = tk.Canvas(outer, highlightthickness=0)
@@ -292,6 +329,9 @@ class AppLauncher(TkinterDnD.Tk):
         self._srt_var = tk.StringVar()
         self._srt_combo = ttk.Combobox(srt_row, textvariable=self._srt_var, state="readonly")
         self._srt_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(srt_row, text="浏览", width=4,
+                   command=lambda: self._browse_file("字幕", [("SRT 字幕", "*.srt")], self._srt_var, self._srt_combo)
+                   ).pack(side=tk.LEFT, padx=(4, 0))
         self._srt_list = []
 
         # 弹幕文件选择
@@ -301,6 +341,9 @@ class AppLauncher(TkinterDnD.Tk):
         self._ass_var = tk.StringVar()
         self._ass_combo = ttk.Combobox(ass_row, textvariable=self._ass_var, state="readonly")
         self._ass_combo.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(ass_row, text="浏览", width=4,
+                   command=lambda: self._browse_file("弹幕", [("ASS 弹幕", "*.ass")], self._ass_var, self._ass_combo)
+                   ).pack(side=tk.LEFT, padx=(4, 0))
         self._ass_list = []
 
         # 素材预览
@@ -399,7 +442,9 @@ class AppLauncher(TkinterDnD.Tk):
         self._edit_btn = ttk.Button(flow_bottom, text="编辑切片数据",
                                      command=self._edit_data_source)
         self._edit_btn.pack(side=tk.RIGHT, padx=(4, 0))
-        ttk.Button(flow_bottom, text="字幕发言人",
+        ttk.Button(flow_bottom, text="校核高光",
+                   command=self._edit_highlight_review).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(flow_bottom, text="完整字幕",
                    command=self._edit_subtitle_speakers).pack(side=tk.RIGHT, padx=4)
 
         # 配置行：切片数量 + 封面风格
@@ -429,22 +474,23 @@ class AppLauncher(TkinterDnD.Tk):
         mode_row = ttk.Frame(actions)
         mode_row.pack(fill=tk.X, pady=(4, 2))
         ttk.Label(mode_row, text="分析模式:", font=("Microsoft YaHei UI", 8)).pack(side=tk.LEFT)
-        ttk.Radiobutton(mode_row, text="模式1 模糊（不推测发言人）", variable=self._analysis_mode,
+        ttk.Radiobutton(mode_row, text="模式1 模糊（默认，先找高光）", variable=self._analysis_mode,
                         value="fuzzy").pack(side=tk.LEFT, padx=(4, 12))
-        ttk.Radiobutton(mode_row, text="模式2 精确（人工指定发言人后再分析）", variable=self._analysis_mode,
-                        value="precise").pack(side=tk.LEFT)
+        ttk.Radiobutton(mode_row, text="模式2 精确（配置发言人后重分析）", variable=self._analysis_mode,
+                        value="precise",
+                        command=self._on_precise_mode).pack(side=tk.LEFT)
 
         # 快捷工具
         util_row = ttk.Frame(actions)
         util_row.pack(fill=tk.X)
         ttk.Button(util_row, text="打开输入文件夹",
-                   command=lambda: os.startfile(self.input_dir_var.get())).pack(side=tk.LEFT, padx=(0, 4))
+                   command=lambda: self._open_folder(self.input_dir_var.get())).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(util_row, text="打开输出文件夹",
-                   command=lambda: os.startfile(self.output_dir_var.get())).pack(side=tk.LEFT, padx=(0, 4))
+                   command=lambda: self._open_folder(self.output_dir_var.get())).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(util_row, text="用 Kdenlive 打开",
                    command=self._open_kdenlive).pack(side=tk.LEFT, padx=(0, 4))
         ttk.Button(util_row, text="查看日志文件",
-                   command=lambda: os.startfile(str(LOG_DIR))).pack(side=tk.LEFT)
+                   command=lambda: self._open_folder(str(LOG_DIR))).pack(side=tk.LEFT)
 
         # 高级配置（默认折叠）
         self.advanced_toggle = ttk.Button(root, text="▼ 展开高级配置",
@@ -598,10 +644,11 @@ class AppLauncher(TkinterDnD.Tk):
             else:
                 self.input_label.config(text="素材目录: 空（请放入素材）", foreground="#c90")
 
-            # 填充视频/字幕/弹幕选择。BV模式下不预选旧文件，只显示占位符。
+            # 填充视频/字幕/弹幕选择
             is_bv = self._mode.get() == "bv"
 
             # 视频
+            prev_video = self._video_var.get()
             self._video_list = [(str(v), f"{v.name}  ({v.stat().st_size/1048576:.0f} MB)") for v in videos]
             if is_bv and not videos:
                 self._video_list = []
@@ -609,21 +656,33 @@ class AppLauncher(TkinterDnD.Tk):
                 self._video_combo["values"] = ["(BV下载后自动匹配)"]
             elif videos:
                 self._video_combo["values"] = [l for _, l in self._video_list]
-                self._video_combo.current(0)
+                # 保持用户之前的选择，不强制跳回第一个
+                kept = False
+                if prev_video:
+                    for path, display in self._video_list:
+                        if display == prev_video:
+                            for i, (_, d) in enumerate(self._video_list):
+                                if d == prev_video:
+                                    self._video_combo.current(i)
+                                    kept = True
+                                    break
+                            break
+                if not kept:
+                    self._video_combo.current(0)
                 self._on_video_select()
             else:
                 self._video_var.set("(未检测到视频 — 请拖入文件)")
                 self._video_combo["values"] = ["(未检测到视频 — 请拖入文件)"]
 
-            # 字幕
+            # 字幕 — BV模式下也尝试匹配已有文件，匹配不到才显示占位符
             video = self._get_selected_video()
             self._srt_list = [(str(f), f.name) for f in sorted(srts)]
-            matched_srt = self._smart_match_file(srts, video.stem, ".srt") if video and not is_bv else None
+            matched_srt = self._smart_match_file(srts, video.stem, ".srt") if video else None
             if matched_srt:
                 self._srt_combo["values"] = [l for _, l in self._srt_list]
                 for p, d in self._srt_list:
                     if p == str(matched_srt): self._srt_var.set(d); break
-            elif is_bv:
+            elif is_bv and not srts:
                 self._srt_list = []
                 self._srt_var.set("(BV下载后自动匹配)")
                 self._srt_combo["values"] = ["(BV下载后自动匹配)"]
@@ -634,14 +693,14 @@ class AppLauncher(TkinterDnD.Tk):
                 self._srt_var.set("(无字幕 — 将自动生成)")
                 self._srt_combo["values"] = ["(无字幕 — 将自动生成)"]
 
-            # 弹幕
+            # 弹幕 — 同上，BV模式下也尝试匹配已有文件
             self._ass_list = [(str(f), f.name) for f in sorted(ass)]
-            matched_ass = self._smart_match_file(ass, video.stem, ".ass") if video and not is_bv else None
+            matched_ass = self._smart_match_file(ass, video.stem, ".ass") if video else None
             if matched_ass:
                 self._ass_combo["values"] = [l for _, l in self._ass_list]
                 for p, d in self._ass_list:
                     if p == str(matched_ass): self._ass_var.set(d); break
-            elif is_bv:
+            elif is_bv and not ass:
                 self._ass_list = []
                 self._ass_var.set("(BV下载后自动匹配)")
                 self._ass_combo["values"] = ["(BV下载后自动匹配)"]
@@ -653,16 +712,6 @@ class AppLauncher(TkinterDnD.Tk):
                 self._ass_combo["values"] = ["(无弹幕 — 将自动跳过)"]
         else:
             self.input_label.config(text="输入目录: 不存在", foreground="#e44")
-
-        # 自动整理：素材根目录有视频文件 → 按分类归入子文件夹（防止递归）
-        if input_path.exists() and videos and not getattr(self, '_organizing', False):
-            root_videos = [v for v in videos if v.parent == input_path]
-            if root_videos:
-                self._organizing = True
-                try:
-                    self._organize_files()
-                finally:
-                    self._organizing = False
 
         # 更新编辑按钮状态
         self._update_edit_btn()
@@ -877,13 +926,21 @@ class AppLauncher(TkinterDnD.Tk):
     def _refresh_input_list(self):
         base = Path(self.input_dir_var.get())
         self._input_dirs = {}
+        # 预定义的分类目录名，即使为空也展示
+        known_categories = {c for c, _ in self.SPEAKER_TYPES if c not in ("未指定", "旁白", "一起说", "ASOUL")}
+        known_categories.update({"小心思", "ASOUL团播", "枝江大团播", "闪耀舞台", "未分类",
+                                  "嘉然×贝拉", "嘉然×乃琳", "贝拉×乃琳"})
         if base.exists():
             for child in sorted(base.iterdir()):
                 if not child.is_dir() or "__no_danmaku__" in child.name:
                     continue
-                has_media = any(child.rglob(f"*{ext}") for ext in [".mp4", ".flv", ".mkv", ".mov", ".ts", ".srt", ".ass"])
-                if has_media:
-                    self._input_dirs[child.name] = str(child)
+                # 已知分类目录始终展示，其他目录需包含素材才展示
+                is_known = child.name in known_categories
+                if not is_known:
+                    has_media = any(child.rglob(f"*{ext}") for ext in [".mp4", ".flv", ".mkv", ".mov", ".ts", ".srt", ".ass"])
+                    if not has_media:
+                        continue
+                self._input_dirs[child.name] = str(child)
                 for grandchild in sorted(child.iterdir()):
                     if grandchild.is_dir() and "__no_danmaku__" not in grandchild.name:
                         self._input_dirs[f"{child.name}/{grandchild.name}"] = str(grandchild)
@@ -906,26 +963,7 @@ class AppLauncher(TkinterDnD.Tk):
         active = [n for n, v in self._member_vars.items() if v.get()]
         if not active:
             return
-
-        aso = {"嘉然", "贝拉", "乃琳"}
-        active_aso = [n for n in active if n in aso]
-        active_ss = [n for n in active if n not in aso]
-
-        if len(active) == 1:
-            cat = active[0]
-        elif set(active) == {"心宜", "思诺"}:
-            cat = "小心思"
-        elif len(active) == 2 and all(n in aso for n in active):
-            cat = "×".join(sorted(active))
-        elif len(active_aso) >= 2 and active_ss:
-            cat = "枝江大团播"
-        elif len(active_aso) >= 2:
-            cat = "ASOUL团播"
-        elif active_ss:
-            cat = "闪耀舞台"
-        else:
-            cat = "其他"
-
+        cat = self._resolve_category()
         out_base = self.output_dir_var.get().rstrip("/")
         inp_base = self.input_dir_var.get().rstrip("/")
         self._video_preview_label.config(
@@ -933,7 +971,10 @@ class AppLauncher(TkinterDnD.Tk):
             foreground="#4a4")
 
     def _convert_srt_to_simplified(self, srt_path):
-        """将 SRT 字幕从繁体转为简体"""
+        """将 SRT 字幕从繁体转为简体（缓存已处理文件）"""
+        if srt_path in self._converted_srts:
+            return False
+        self._converted_srts.add(srt_path)
         try:
             import zhconv
             with open(srt_path, "r", encoding="utf-8-sig") as f:
@@ -949,17 +990,105 @@ class AppLauncher(TkinterDnD.Tk):
             pass
         return False
 
+    def _resolve_category(self):
+        """根据当前成员勾选确定分类名"""
+        active = [n for n, v in self._member_vars.items() if v.get()]
+        aso_set = {"嘉然", "贝拉", "乃琳"}
+        active_aso = [n for n in active if n in aso_set]
+        active_ss = [n for n in active if n not in aso_set]
+
+        if len(active) == 1:
+            return active[0]
+        if set(active) == {"心宜", "思诺"}:
+            return "小心思"
+        if len(active) == 2 and all(n in aso_set for n in active):
+            return "×".join(sorted(active))
+        if len(active_aso) >= 2 and not active_ss:
+            return "ASOUL团播"
+        if active_ss and active_aso:
+            return "枝江大团播"
+        if active_ss:
+            return "闪耀舞台"
+        return "未分类"
+
+    def _auto_organize_for_analysis(self):
+        """分析前自动归类：仅移动当前选中视频的配套文件到成员子文件夹"""
+        base = DEFAULT_INPUT_DIR
+        if not base.exists():
+            return
+
+        video = self._get_selected_video()
+        if not video:
+            return
+        # 只处理在根目录下的视频（已归类的跳过）
+        if video.parent != base:
+            return
+
+        category = self._resolve_category()
+        from core.file_utils import sanitize_filename
+
+        name = video.stem
+        date_match = re.search(r'(\d{4})[年-](\d{1,2})[月-](\d{1,2})日?', name)
+        if date_match:
+            y, m, d = date_match.groups()
+            date_str = f"{m}月{d}日"
+        else:
+            import datetime
+            ts = video.stat().st_mtime
+            dt = datetime.datetime.fromtimestamp(ts)
+            date_str = f"{dt.month}月{dt.day}日"
+        short_name = sanitize_filename(name)
+        if len(short_name) > 20:
+            short_name = short_name[:20]
+        folder_name = f"{date_str} {short_name}"
+        target_dir = base / category / folder_name
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        moved = 0
+        # 移动视频
+        dest = target_dir / video.name
+        if video != dest:
+            shutil.move(str(video), str(dest))
+            moved += 1
+        # 移动配套字幕/弹幕
+        for ext in [".srt", ".ass"]:
+            src = base / f"{name}{ext}"
+            if src.exists():
+                shutil.move(str(src), str(target_dir / f"{name}{ext}"))
+
+        if moved > 0:
+            self.log(f"  📁 自动归类: {video.name} → {category}/")
+            self.input_dir_var.set(str(target_dir))
+            os.environ["AUTOCLIP_INPUT_DIR"] = str(target_dir)
+            self._check_environment()
+
+    def _check_analysis_cache(self):
+        """检查是否已有分析缓存（Data_source.txt 比 SRT 新则可复用）"""
+        target = self.input_dir_var.get().strip()
+        ds_path = os.path.join(target, "Data_source.txt")
+        if not os.path.exists(ds_path):
+            ds_path = "Data_source.txt"
+        if not os.path.exists(ds_path):
+            return False
+        srt = self._find_srt_for_check()
+        if not srt:
+            return os.path.getsize(ds_path) > 10  # 有内容就复用
+        try:
+            return os.path.getmtime(ds_path) > os.path.getmtime(str(srt))
+        except Exception:
+            return False
+
     def _organize_files(self):
-        base = Path(self.input_dir_var.get())
+        """将素材根目录的文件按成员勾选归类到子文件夹（手动触发）"""
+        base = DEFAULT_INPUT_DIR
         if not base.exists():
             return
 
         video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
         from core.file_utils import sanitize_filename
-        import re
 
-        # 收集所有视频（排除已在子文件夹中的）
-        all_videos = [f for f in base.rglob("*") if f.suffix.lower() in video_exts and f.parent == base]
+        # 仅收集根目录下的视频（已在子文件夹中的不处理）
+        all_videos = [f for f in base.iterdir() if f.is_file() and f.suffix.lower() in video_exts]
 
         if not all_videos:
             self.log("  没有需要整理的文件（视频已在子文件夹中）")
@@ -967,26 +1096,7 @@ class AppLauncher(TkinterDnD.Tk):
             self._check_environment()
             return
 
-        # 判断分类
-        active = [n for n, v in self._member_vars.items() if v.get()]
-        aso_set = {"嘉然", "贝拉", "乃琳"}
-        active_aso = [n for n in active if n in aso_set]
-        active_ss = [n for n in active if n not in aso_set]
-
-        if len(active) == 1:
-            category = active[0]
-        elif set(active) == {"心宜", "思诺"}:
-            category = "小心思"
-        elif len(active) == 2 and all(n in aso_set for n in active):
-            category = f"{'×'.join(sorted(active))}"
-        elif len(active_aso) >= 2 and not active_ss:
-            category = "ASOUL团播"
-        elif active_ss and active_aso:
-            category = "枝江团播"
-        elif active_ss:
-            category = "闪耀舞台"
-        else:
-            category = "其他"
+        category = self._resolve_category()
 
         moved = 0
         for video in all_videos:
@@ -997,13 +1107,11 @@ class AppLauncher(TkinterDnD.Tk):
                 y, m, d = date_match.groups()
                 date_str = f"{m}月{d}日"
             else:
-                # 用文件修改时间
                 import datetime
                 ts = video.stat().st_mtime
                 dt = datetime.datetime.fromtimestamp(ts)
                 date_str = f"{dt.month}月{dt.day}日"
 
-            # 保留视频名中有意义的部分
             short_name = sanitize_filename(name)
             if len(short_name) > 20:
                 short_name = short_name[:20]
@@ -1012,7 +1120,6 @@ class AppLauncher(TkinterDnD.Tk):
             target_dir = base / category / folder_name
             target_dir.mkdir(parents=True, exist_ok=True)
 
-            # 移动视频
             dest = target_dir / video.name
             if video != dest:
                 shutil.move(str(video), str(dest))
@@ -1042,26 +1149,53 @@ class AppLauncher(TkinterDnD.Tk):
             self._check_environment()
 
     def _on_video_select(self, event=None):
-        """用户选择了视频文件 → 更新输出预览"""
+        """用户选择了视频文件 → 同步匹配字幕/弹幕 + 更新输出预览"""
         sel = self._video_var.get()
+        video_path = None
+        video_stem = None
         for path, display in self._video_list:
             if display == sel:
+                video_path = Path(path)
+                video_stem = video_path.stem
                 from core.file_utils import sanitize_filename
-                p = Path(path)
-                # 构建输出路径：镜像输入子文件夹结构
                 base_input = Path(self.input_dir_var.get())
                 try:
-                    rel = p.parent.relative_to(base_input)
+                    rel = video_path.parent.relative_to(base_input)
                 except ValueError:
                     rel = Path(".")
                 out_base = self.output_dir_var.get().rstrip("/")
                 if str(rel) != ".":
-                    out_path = f"{out_base}/{rel}/{sanitize_filename(p.stem)}/"
+                    out_path = f"{out_base}/{rel}/{sanitize_filename(video_stem)}/"
                 else:
-                    out_path = f"{out_base}/{sanitize_filename(p.stem)}/"
+                    out_path = f"{out_base}/{sanitize_filename(video_stem)}/"
                 self._video_preview_label.config(
                     text=f"→ 输出: {out_path}", foreground="#4a4")
                 break
+
+        # 同步切换字幕和弹幕选择
+        if video_stem:
+            # 字幕：查找同名 SRT
+            for p, d in self._srt_list:
+                if Path(p).stem == video_stem:
+                    self._srt_var.set(d)
+                    break
+            else:
+                if self._srt_list:
+                    self._srt_var.set("(未匹配 — 请手动选择)")
+                    values = ["(未匹配 — 请手动选择)"] + [l for _, l in self._srt_list]
+                    if self._srt_combo["values"] != tuple(values):
+                        self._srt_combo["values"] = values
+            # 弹幕：查找同名 ASS
+            for p, d in self._ass_list:
+                if Path(p).stem == video_stem:
+                    self._ass_var.set(d)
+                    break
+            else:
+                if self._ass_list:
+                    self._ass_var.set("(未匹配 — 请手动选择)")
+                    values = ["(未匹配 — 请手动选择)"] + [l for _, l in self._ass_list]
+                    if self._ass_combo["values"] != tuple(values):
+                        self._ass_combo["values"] = values
 
     def _get_selected_video(self):
         """返回用户选择的视频文件路径（BV模式未下载时返回None）"""
@@ -1108,6 +1242,48 @@ class AppLauncher(TkinterDnD.Tk):
                 return f
         return files[0] if files else None
 
+    def _browse_file(self, title, filetypes, string_var, combo):
+        """自由选择文件（字幕/弹幕），更新 StringVar 并拷贝到素材目录"""
+        path = filedialog.askopenfilename(
+            title=f"选择{title}文件",
+            filetypes=filetypes,
+            initialdir=self.input_dir_var.get() or str(DEFAULT_INPUT_DIR),
+        )
+        if not path:
+            return
+        fname = os.path.basename(path)
+        target_dir = self.input_dir_var.get().strip()
+        if not target_dir:
+            target_dir = str(DEFAULT_INPUT_DIR)
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+            dst = os.path.join(target_dir, fname)
+            if os.path.abspath(path) != os.path.abspath(dst):
+                shutil.copy2(path, dst)
+                self.log(f"[浏览] 已复制 {title} 文件: {fname}")
+            else:
+                dst = path
+        except Exception as e:
+            self.log(f"[浏览] 复制失败: {e}")
+            dst = path
+        string_var.set(os.path.basename(dst))
+        # 更新 combobox 列表
+        current_values = list(combo["values"])
+        if fname not in current_values:
+            combo["values"] = [fname] + [v for v in current_values if v != fname]
+        combo.current(0)
+        # 仅更新文件列表，不触发完整环境检测（避免 organize 移动文件）
+        self._update_edit_btn()
+
+    def _open_folder(self, path_str):
+        """安全打开文件夹：不存在则创建，失败则记录日志"""
+        p = Path(path_str)
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            os.startfile(str(p))
+        except Exception as e:
+            self.log(f"[打开] 失败: {p} — {e}")
+
     def choose_input_dir(self):
         path = filedialog.askdirectory(initialdir=self.input_dir_var.get() or str(DEFAULT_INPUT_DIR))
         if path:
@@ -1142,7 +1318,6 @@ class AppLauncher(TkinterDnD.Tk):
             self.drop_label.config(text=f"已导入 {copied} 个文件 ✓", fg="#4a4")
             self.after(3000, lambda: self.drop_label.config(
                 text="将视频/字幕/弹幕文件拖放到这里（自动复制到输入目录）", fg="#777"))
-            self._organize_files()
             self._check_environment()
 
     def choose_output_dir(self):
@@ -1260,29 +1435,46 @@ class AppLauncher(TkinterDnD.Tk):
             messagebox.showerror("测试失败", f"无法连接:\n{e}")
 
     def _open_kdenlive(self):
-        """尝试用 Kdenlive 打开输出目录"""
+        """打开输出目录中最新的子文件夹"""
         out_dir = self.output_dir_var.get().strip()
         if not os.path.isdir(out_dir):
             messagebox.showinfo("提示", "输出目录还不存在，请先运行一次切片。")
             return
-        # 找出最新的子目录（最近生成的片段）
         try:
             subs = sorted(Path(out_dir).iterdir(), key=lambda p: p.stat().st_mtime, reverse=True)
             latest = next((s for s in subs if s.is_dir()), Path(out_dir))
-            os.startfile(str(latest))
+            self._open_folder(str(latest))
             self.log(f"[快捷] 已打开: {latest.name}")
         except Exception as e:
             self.log(f"[快捷] 打开失败: {e}")
-            os.startfile(out_dir)
+            self._open_folder(out_dir)
 
     def _edit_subtitle_speakers(self):
         """模式2：字幕发言人编辑器 — 逐条指定发言人 + 编辑文字"""
-        target = self.input_dir_var.get().strip()
-        srts = list(Path(target).rglob("*.srt"))
-        if not srts:
-            messagebox.showinfo("提示", "未找到 SRT 字幕文件")
-            return
-        srt_path = str(srts[0])
+        # 优先使用已选中的 SRT，避免全目录扫描卡顿
+        srt_path = None
+        selected = self._get_selected_srt()
+        if selected and selected.exists():
+            srt_path = str(selected)
+        else:
+            # 快速层：仅扫描顶层目录
+            target = self.input_dir_var.get().strip()
+            top_srts = [f for f in Path(target).glob("*.srt") if "__no_danmaku__" not in str(f)]
+            if top_srts:
+                srt_path = str(top_srts[0])
+            else:
+                # 回退：递归扫描（仅单层子文件夹，比 rglob 快很多）
+                sub_srts = [f for f in Path(target).glob("*/*.srt") if "__no_danmaku__" not in str(f)]
+                if sub_srts:
+                    srt_path = str(sub_srts[0])
+                else:
+                    # 最终回退：完整 rglob
+                    srts = list(Path(target).rglob("*.srt"))
+                    srts = [f for f in srts if "__no_danmaku__" not in str(f)]
+                    if not srts:
+                        messagebox.showinfo("提示", "未找到 SRT 字幕文件")
+                        return
+                    srt_path = str(srts[0])
 
         # 解析 SRT
         with open(srt_path, "r", encoding="utf-8-sig") as f:
@@ -1297,14 +1489,11 @@ class AppLauncher(TkinterDnD.Tk):
                     "text": "\n".join(lines[2:])
                 })
 
-        # 成员颜色
-        colors = {
-            "嘉然": "#FF69B4", "贝拉": "#9B59B6", "乃琳": "#3498DB",
-            "心宜": "#FF1493", "思诺": "#EEA0D7", "未指定": "#888",
-        }
+        # 使用统一的发言人配色
+        colors = self.SPEAKER_COLORS
 
         win = tk.Toplevel(self)
-        win.title("字幕发言人编辑（模式2）")
+        win.title("字幕发言人编辑（完整字幕）")
         win.geometry("900x650")
         win.transient(self)
 
@@ -1314,17 +1503,18 @@ class AppLauncher(TkinterDnD.Tk):
         ttk.Label(top, text=f"共 {len(entries)} 条字幕 — 指定发言人后自动应用成员配色",
                   font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
         batch_var = tk.StringVar()
+        batch_list = ["批量设置:"] + [f"全部→{t[0]}" for t in self.SPEAKER_TYPES if t[0] != "未指定"]
         batch_combo = ttk.Combobox(top, textvariable=batch_var,
-                                    values=["批量设置:", "全部→嘉然", "全部→贝拉", "全部→乃琳", "全部→心宜", "全部→思诺"],
+                                    values=batch_list,
                                     state="readonly", width=15)
         batch_combo.pack(side=tk.RIGHT, padx=4)
 
         def _batch_set():
             sel = batch_var.get()
-            for m in ["嘉然", "贝拉", "乃琳", "心宜", "思诺"]:
-                if m in sel:
+            for t in self.SPEAKER_TYPES:
+                if f"全部→{t[0]}" == sel:
                     for e in entries:
-                        e["speaker"] = m
+                        e["speaker"] = t[0]
                     _refresh_list()
                     break
 
@@ -1338,47 +1528,73 @@ class AppLauncher(TkinterDnD.Tk):
         canvas.create_window((0, 0), window=sf, anchor="nw")
         canvas.configure(yscrollcommand=sb.set)
 
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
+        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 12), pady=8)
+
+        # 进度标签 + 分页控件
+        progress_frame = ttk.Frame(win)
+        progress_frame.pack(fill=tk.X, padx=12, pady=(0, 4))
+        self._speaker_progress = ttk.Label(progress_frame, text="正在加载...", foreground="#888",
+                                            font=("Microsoft YaHei UI", 9))
+        self._speaker_progress.pack(side=tk.LEFT)
+        page_frame = ttk.Frame(progress_frame)
+        page_frame.pack(side=tk.RIGHT)
+        page_label = ttk.Label(page_frame, text="", foreground="#888")
+        page_label.pack(side=tk.LEFT, padx=(0, 8))
+
         speaker_vars = []
         text_vars = []
+        BATCH_SIZE = 60  # 每批渲染条目数，避免创建大量 widget 卡 UI
 
-        def _refresh_list():
-            for w in sf.winfo_children():
-                w.destroy()
-            speaker_vars.clear()
-            text_vars.clear()
-            for i, e in enumerate(entries):
+        def _render_batch(start_idx):
+            """分批渲染：每次渲染 BATCH_SIZE 条，用 after 调度下一批"""
+            end_idx = min(start_idx + BATCH_SIZE, len(entries))
+            for i in range(start_idx, end_idx):
+                e = entries[i]
                 row = ttk.Frame(sf)
                 row.pack(fill=tk.X, padx=8, pady=1)
 
-                # 时间戳
                 ts_text = e["ts"].split(" --> ")[0][:8] if "-->" in e["ts"] else e["ts"][:8]
                 ttk.Label(row, text=ts_text, font=("Consolas", 8), width=7).pack(side=tk.LEFT)
 
-                # 发言人下拉
                 sp_var = tk.StringVar(value=e.get("speaker", "未指定"))
                 speaker_vars.append(sp_var)
                 sp_combo = ttk.Combobox(row, textvariable=sp_var,
-                                         values=["未指定", "嘉然", "贝拉", "乃琳", "心宜", "思诺"],
+                                         values=[t[0] for t in self.SPEAKER_TYPES],
                                          state="readonly", width=6)
                 sp_combo.pack(side=tk.LEFT, padx=2)
 
-                # 颜色预览
                 color_label = tk.Label(row, text="●", fg=colors.get(sp_var.get(), "#888"),
                                        font=("Consolas", 10), width=2)
                 color_label.pack(side=tk.LEFT)
                 sp_var.trace_add("write", lambda *a, l=color_label, v=sp_var:
                     l.configure(fg=colors.get(v.get(), "#888")))
 
-                # 可编辑文字
                 txt_var = tk.StringVar(value=e["text"])
                 text_vars.append(txt_var)
-                txt_entry = ttk.Entry(row, textvariable=txt_var, font=("Microsoft YaHei UI", 9))
-                txt_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+                ttk.Entry(row, textvariable=txt_var, font=("Microsoft YaHei UI", 9)
+                          ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+
+            progress_pct = min(100, int(end_idx / len(entries) * 100))
+            self._speaker_progress.config(text=f"已加载 {end_idx}/{len(entries)} 条 ({progress_pct}%)")
+            sf.update_idletasks()
+
+            if end_idx < len(entries):
+                win.after(5, lambda: _render_batch(end_idx))
+            else:
+                self._speaker_progress.config(text=f"共 {len(entries)} 条字幕 — 指定发言人后自动应用成员配色",
+                                              foreground="#4a4")
+                page_label.config(text="")
+
+        def _refresh_list():
+            for w in sf.winfo_children():
+                w.destroy()
+            speaker_vars.clear()
+            text_vars.clear()
+            self._speaker_progress.config(text="正在加载...", foreground="#888")
+            win.after(5, lambda: _render_batch(0))
 
         _refresh_list()
-
-        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(12, 0), pady=8)
-        sb.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 12), pady=8)
 
         # 保存按钮
         btn_row = ttk.Frame(win, padding=10)
@@ -1404,6 +1620,288 @@ class AppLauncher(TkinterDnD.Tk):
 
         ttk.Button(btn_row, text="💾 保存发言人标记", command=_save).pack(side=tk.RIGHT, padx=4)
         ttk.Button(btn_row, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
+
+    def _edit_highlight_review(self):
+        """高光片段校核器 — 逐段审阅 AI 分析结果 + 播放视频 + 指定发言人"""
+        from core.subtitle_utils import SubtitleUtils
+        # 1. 读取 Data_source.txt
+        target = self.input_dir_var.get().strip()
+        ds_path = os.path.join(target, "Data_source.txt")
+        if not os.path.exists(ds_path):
+            ds_path = "Data_source.txt"
+        if not os.path.exists(ds_path):
+            messagebox.showinfo("提示", "尚未生成 Data_source.txt，请先运行弹幕分析（第3步）。")
+            return
+        try:
+            with open(ds_path, "r", encoding="utf-8") as f:
+                segments = json.load(f)
+        except Exception as e:
+            messagebox.showerror("读取失败", f"无法读取 Data_source.txt:\n{e}")
+            return
+        if not segments:
+            messagebox.showinfo("提示", "Data_source.txt 中没有高光片段。")
+            return
+
+        # 2. 查找 SRT 和视频
+        srt_path = self._find_srt_for_check()
+        if not srt_path:
+            messagebox.showinfo("提示", "未找到字幕文件，无法校核发言人。")
+            return
+        video = self._get_selected_video()
+        if not video:
+            # 尝试从 _video_list 中回退
+            if self._video_list:
+                video = Path(self._video_list[0][0])
+        srt_entries = SubtitleUtils.parse_srt(str(srt_path))
+        if not srt_entries:
+            messagebox.showinfo("提示", "字幕文件为空或格式无法解析。")
+            return
+
+        # 3. 按片段提取字幕
+        segment_data = []
+        for seg in segments:
+            ts = seg.get("timestamp", "")
+            parts = ts.split("-")
+            if len(parts) != 2:
+                continue
+            try:
+                t0 = self._parse_srt_time(parts[0].strip())
+                t1 = self._parse_srt_time(parts[1].strip())
+            except Exception:
+                continue
+            subs = [s for s in srt_entries if s["end"] > t0 and s["start"] < t1]
+            # 往前多取 2 句，往后多取 1 句做上下文
+            idxs = [i for i, s in enumerate(srt_entries) if s["end"] > t0 and s["start"] < t1]
+            if idxs:
+                pre = max(0, idxs[0] - 2)
+                post = min(len(srt_entries), idxs[-1] + 2)
+                subs = srt_entries[pre:post]
+            else:
+                subs = []
+            segment_data.append({
+                "seg": seg,
+                "subs": subs,
+                "t0": t0,
+                "t1": t1,
+            })
+
+        # 4. 构建 UI
+        win = tk.Toplevel(self)
+        win.title("高光片段校核器")
+        win.geometry("1000x720")
+        win.minsize(800, 500)
+        win.transient(self)
+
+        # 顶部工具栏
+        toolbar = ttk.Frame(win, padding=8)
+        toolbar.pack(fill=tk.X)
+        ttk.Label(toolbar, text=f"共 {len(segments)} 个高光片段 | 字幕: {srt_path.name}",
+                  font=("Microsoft YaHei UI", 10, "bold")).pack(side=tk.LEFT)
+        seg_nav = ttk.Frame(toolbar)
+        seg_nav.pack(side=tk.RIGHT)
+        ttk.Button(seg_nav, text="◀ 上一段", width=8,
+                   command=lambda: _nav(-1)).pack(side=tk.LEFT, padx=2)
+        seg_label = ttk.Label(seg_nav, text=f"1/{len(segments)}", width=8,
+                               font=("Microsoft YaHei UI", 9))
+        seg_label.pack(side=tk.LEFT, padx=4)
+        ttk.Button(seg_nav, text="下一段 ▶", width=8,
+                   command=lambda: _nav(1)).pack(side=tk.LEFT, padx=2)
+
+        # 主区域：Canvas 滚动
+        canvas = tk.Canvas(win, highlightthickness=0)
+        sb = ttk.Scrollbar(win, orient=tk.VERTICAL, command=canvas.yview)
+        main_frame = ttk.Frame(canvas, padding=12)
+        main_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        sb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # 鼠标滚轮
+        def _on_mousewheel(event):
+            canvas.yview_scroll(-1 * (event.delta // 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+
+        cur_idx = [0]
+        speaker_vars = {}  # key: (seg_idx, sub_idx) → StringVar
+        all_entries = {}   # key: (seg_idx, sub_idx) → modified text StringVar
+
+        def _play_segment(t0):
+            """用 ffplay 打开视频并跳转到指定时间"""
+            if not video or not video.exists():
+                messagebox.showinfo("提示", "未找到视频文件")
+                return
+            vpath = str(video)
+            try:
+                subprocess.Popen(
+                    ["ffplay", "-ss", str(max(0, t0 - 2)), "-window_title",
+                     f"高光片段预览", "-autoexit", vpath],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            except FileNotFoundError:
+                # ffplay 不可用，用系统默认播放器（无法 seek）
+                os.startfile(vpath)
+            except Exception as e:
+                self.log(f"[播放] 失败: {e}")
+
+        def _render_segment(idx):
+            for w in main_frame.winfo_children():
+                w.destroy()
+
+            if idx < 0 or idx >= len(segment_data):
+                return
+            sd = segment_data[idx]
+            seg = sd["seg"]
+            subs = sd["subs"]
+            t0, t1 = sd["t0"], sd["t1"]
+
+            seg_label.config(text=f"{idx + 1}/{len(segments)}")
+
+            # AI 分析结果卡片
+            ai_card = ttk.LabelFrame(main_frame, text="AI 分析结果", padding=8)
+            ai_card.pack(fill=tk.X, pady=(0, 8))
+
+            ttk.Label(ai_card, text=f"标题: {seg.get('title', '(无)')}",
+                      font=("Microsoft YaHei UI", 10, "bold"), foreground="#4af").pack(anchor="w")
+            ttk.Label(ai_card, text=f"摘要: {seg.get('summary', '(无)')}",
+                      font=("Microsoft YaHei UI", 9), foreground="#ccc").pack(anchor="w", pady=(2, 0))
+            cover_row = ttk.Frame(ai_card)
+            cover_row.pack(fill=tk.X, pady=(4, 0))
+            ttk.Label(cover_row, text=f"封面大字: {seg.get('cover_text_1', '')}",
+                      foreground="#FFD700", font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, padx=(0, 16))
+            ttk.Label(cover_row, text=f"封面小字: {seg.get('cover_text_2', '')}",
+                      foreground="#FFD700", font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT)
+            ttk.Label(ai_card, text=f"高光理由: {seg.get('highlight_reason', '(无)')}",
+                      foreground="#aaa", font=("Microsoft YaHei UI", 8)).pack(anchor="w", pady=(2, 0))
+            ttk.Label(ai_card, text=f"时间: {self._format_seconds(t0)} → {self._format_seconds(t1)}",
+                      foreground="#888", font=("Consolas", 9)).pack(anchor="w", pady=(4, 0))
+
+            # 播放按钮
+            play_btn = ttk.Button(ai_card, text="▶ 播放此片段",
+                                  command=lambda t=t0: _play_segment(t))
+            play_btn.pack(anchor="w", pady=(8, 0))
+
+            # 字幕列表
+            if not subs:
+                ttk.Label(main_frame, text="(此片段内无匹配字幕)",
+                          foreground="#888").pack(pady=20)
+                return
+
+            sub_card = ttk.LabelFrame(main_frame,
+                                       text=f"字幕 ({len(subs)} 条) — 逐条指定发言人",
+                                       padding=8)
+            sub_card.pack(fill=tk.X)
+
+            for si, sub in enumerate(subs):
+                row = ttk.Frame(sub_card)
+                row.pack(fill=tk.X, pady=1)
+
+                # 时间戳
+                ts = f"{self._format_seconds(sub['start'])}"
+                ttk.Label(row, text=ts, font=("Consolas", 8),
+                          foreground="#888", width=7).pack(side=tk.LEFT)
+
+                # 发言人下拉
+                key = (idx, si)
+                sp_var = tk.StringVar(value="未指定")
+                speaker_vars[key] = sp_var
+                sp_combo = ttk.Combobox(row, textvariable=sp_var,
+                                         values=[t[0] for t in self.SPEAKER_TYPES],
+                                         state="readonly", width=6)
+                sp_combo.pack(side=tk.LEFT, padx=2)
+                sp_combo.bind("<<ComboboxSelected>>",
+                               lambda e, k=key: _on_speaker_change(k))
+
+                # 颜色预览
+                color_lbl = tk.Label(row, text="●", fg=self.SPEAKER_COLORS["未指定"],
+                                     font=("Consolas", 10), width=2, bg="#1e1e1e")
+                color_lbl.pack(side=tk.LEFT)
+                sp_var.trace_add("write", lambda *a, l=color_lbl, v=sp_var:
+                    l.configure(fg=self.SPEAKER_COLORS.get(v.get(), "#888")))
+
+                # 字幕文本
+                txt_var = tk.StringVar(value=sub["text"])
+                all_entries[key] = txt_var
+                ttk.Entry(row, textvariable=txt_var,
+                          font=("Microsoft YaHei UI", 9)).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=4)
+
+            # 批量设置此行字幕的发言人
+            batch_row = ttk.Frame(sub_card)
+            batch_row.pack(fill=tk.X, pady=(8, 0))
+            ttk.Label(batch_row, text="批量设置本段:", font=("Microsoft YaHei UI", 8),
+                      foreground="#888").pack(side=tk.LEFT)
+            for sp_name, sp_color in self.SPEAKER_TYPES:
+                if sp_name == "未指定":
+                    continue
+                btn = tk.Button(batch_row, text=sp_name, font=("Microsoft YaHei UI", 7),
+                                fg=sp_color, bg="#2a2a2a", relief=tk.FLAT, padx=4,
+                                command=lambda n=sp_name, i=idx: _batch_set_speaker(i, n))
+                btn.pack(side=tk.LEFT, padx=1)
+
+        def _on_speaker_change(key):
+            pass  # 颜色已通过 trace_add 更新
+
+        def _batch_set_speaker(seg_idx, name):
+            for si in range(len(segment_data[seg_idx]["subs"])):
+                key = (seg_idx, si)
+                if key in speaker_vars:
+                    speaker_vars[key].set(name)
+
+        def _nav(delta):
+            # 保存当前段编辑内容
+            new_idx = cur_idx[0] + delta
+            if 0 <= new_idx < len(segment_data):
+                cur_idx[0] = new_idx
+                _render_segment(new_idx)
+
+        _render_segment(0)
+
+        # 底部保存按钮
+        bottom = ttk.Frame(win, padding=12)
+        bottom.pack(fill=tk.X, side=tk.BOTTOM)
+
+        def _save_all():
+            # 收集所有 speaker 标记
+            speaker_map = {}  # sub text → speaker (按原始文本匹配)
+            for key, var in speaker_vars.items():
+                sp = var.get()
+                if sp == "未指定":
+                    continue
+                seg_idx, sub_idx = key
+                sub = segment_data[seg_idx]["subs"][sub_idx]
+                speaker_map[sub["text"]] = sp
+            # 写回 SRT：在每条字幕前加 [发言人]
+            def _fmt_ts(sec):
+                h = int(sec // 3600)
+                m = int((sec % 3600) // 60)
+                s = int(sec % 60)
+                ms = int((sec % 1) * 1000)
+                return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+            out_lines = []
+            for i, entry in enumerate(srt_entries, 1):
+                out_lines.append(str(i))
+                out_lines.append(f"{_fmt_ts(entry['start'])} --> {_fmt_ts(entry['end'])}")
+                sp = speaker_map.get(entry["text"], "")
+                # 也检查编辑后的文本
+                for key, txt_var in all_entries.items():
+                    if txt_var.get() == entry["text"] and key in speaker_vars:
+                        sp = speaker_vars[key].get()
+                        break
+                text = entry["text"]
+                if sp and sp != "未指定":
+                    text = f"[{sp}] {text}"
+                out_lines.append(text)
+                out_lines.append("")
+            with open(str(srt_path), "w", encoding="utf-8-sig") as f:
+                f.write("\n".join(out_lines))
+            self.log(f"  发言人标记已保存: {srt_path.name} ({len(speaker_map)} 条已标记)")
+            messagebox.showinfo("已保存", f"已保存 {len(speaker_map)} 条字幕的发言人标记\n\n"
+                                "可切换到「模式2 精确」重新运行第3步以获取更准确的标题。")
+            win.destroy()
+
+        ttk.Button(bottom, text="💾 保存发言人标记并关闭", command=_save_all).pack(side=tk.RIGHT, padx=4)
+        ttk.Button(bottom, text="取消", command=win.destroy).pack(side=tk.RIGHT, padx=4)
 
     def _edit_data_source(self):
         """打开标题编辑器，修改 Data_source.txt 中各片段的标题、摘要、封面文字"""
@@ -1650,6 +2148,20 @@ class AppLauncher(TkinterDnD.Tk):
             self.mode_hint.config(
                 text="将视频拖入上方拖放区 → 必剪免费生成字幕 → 自动切片。无需 API Key 即可使用。")
 
+    def _on_precise_mode(self):
+        """选择精确模式时自动开启暂停；若已有分析结果则直接打开校核器"""
+        if not self._pause_var.get():
+            self._pause_var.set(True)
+            self.log("[分析模式] 已切换到精确模式，自动开启「分析后暂停校核」")
+        # 如果分析已完成（Data_source.txt 存在），直接打开校核器
+        target = self.input_dir_var.get().strip()
+        ds_path = os.path.join(target, "Data_source.txt")
+        if os.path.exists(ds_path):
+            self.log("  检测到已有分析结果，打开高光校核器...")
+            self.after(200, self._edit_highlight_review)
+        else:
+            self.log("  推荐: 先用模式1运行第3步模糊分析 → 校核高光 → 切回精确重分析")
+
     def _on_mode_change(self):
         """切换素材来源模式时刷新步骤描述"""
         self._update_mode_hint()
@@ -1762,7 +2274,11 @@ class AppLauncher(TkinterDnD.Tk):
                 self._mark_step(1, "done")
                 return
 
-            target = self.input_dir_var.get().strip()
+            # 始终下载到顶层素材根目录，后续 _organize_files 会归类
+            target = str(DEFAULT_INPUT_DIR)
+            os.makedirs(target, exist_ok=True)
+            self.input_dir_var.set(target)
+            os.environ["AUTOCLIP_INPUT_DIR"] = target
             sessdata = self.sessdata_var.get().strip()
 
             # [1/4] 下载视频（bilix → yt-dlp → yutto 三级回退）
@@ -1846,9 +2362,9 @@ class AppLauncher(TkinterDnD.Tk):
             else:
                 self.log("  ⚠ 弹幕下载失败（无弹幕将自动跳过分析）")
 
-            # [4/4] 智能整理 + 刷新
-            self.log("  [4/4] 整理文件...")
-            self._organize_files()
+            # [4/4] 刷新文件列表
+            self.log("  [4/4] 下载完成，文件在素材根目录")
+            self.log("   💡 勾选出场成员后点击「整理文件」自动归类")
             self._check_environment()
             self._mark_step(1, "done")
 
@@ -1866,34 +2382,6 @@ class AppLauncher(TkinterDnD.Tk):
             self._check_environment()
 
         self._run_worker("必剪免费ASR", task)
-
-    # ==========================================
-    # 第1步（旧）：下载弹幕和字幕
-    # ==========================================
-
-    def run_download_danmaku(self):
-        def task():
-            self._apply_env()
-            bvid = self.bvid_var.get().strip()
-            if not bvid:
-                self.log("  ⚠ 未填写 BV 号，跳过下载。")
-                self.log("  如果你已有弹幕和字幕文件，直接放在输入目录即可。")
-                return
-            from utils.get_all import BilibiliDownloader
-            downloader = BilibiliDownloader(
-                bvid,
-                self.sessdata_var.get().strip(),
-                self.input_dir_var.get().strip(),
-                auto_correct=True,
-            )
-            downloader.run(
-                download_video=False,
-                download_subtitle=True,
-                download_danmaku=True,
-                download_all_parts=True,
-            )
-
-        self._run_worker("下载弹幕和字幕", task)
 
     # ==========================================
     # 第2步：字幕纠错
@@ -1933,9 +2421,57 @@ class AppLauncher(TkinterDnD.Tk):
 
         self._run_worker("LLM智能字幕纠错", task)
 
+    def _setup_auto_clip_config(self):
+        """配置 Auto_clip.CONFIG，供 run_auto_clip 和 run_all 共用"""
+        import Auto_clip
+        target = self.input_dir_var.get().strip()
+        # input_dir 保留为父级分类目录，保证输出路径包含分类层级
+        # （视频/字幕已通过 source_video/srt_file 显式指定，不依赖 auto_detect）
+        # input_dir 设为分类目录层级（保证输出路径含分类），视频/字幕已显式指定
+        target_path = Path(target).resolve()
+        default_path = DEFAULT_INPUT_DIR.resolve()
+        if target_path.parent == default_path:
+            # target 已是分类目录（如 素材/ASOUL团播）或根目录 → 直接用
+            parent_dir = target
+        else:
+            # target 更深（如 素材/ASOUL团播/06月26日xxx）→ 取父级分类目录
+            parent_dir = str(target_path.parent)
+        Auto_clip.CONFIG["input_dir"] = parent_dir
+        # 输出路径：镜像分类目录结构
+        out_base = self.output_dir_var.get().strip()
+        category = self._resolve_category()
+        Auto_clip.CONFIG["output_dir"] = os.path.join(out_base, category) if category != "未分类" else out_base
+        # 直接传递已选中的视频和字幕
+        video = self._get_selected_video()
+        if video and video.exists():
+            Auto_clip.CONFIG["source_video"] = str(video)
+        srt = self._get_selected_srt()
+        if srt and srt.exists():
+            Auto_clip.CONFIG["srt_file"] = str(srt)
+        cover_style = self._cover_style_var.get().strip()
+        if cover_style:
+            if "cover" not in Auto_clip.CONFIG:
+                Auto_clip.CONFIG["cover"] = {}
+            Auto_clip.CONFIG["cover"]["active_style"] = cover_style
+            try:
+                Auto_clip.CONFIG["cover"]["count"] = int(self._cover_count_var.get().strip() or "5")
+            except ValueError:
+                pass
+        ds_path = os.path.join(target, "Data_source.txt")
+        if not os.path.exists(ds_path):
+            ds_path = "Data_source.txt"
+        Auto_clip.CONFIG["data_source"] = ds_path
+        return Auto_clip
+
     def run_danmaku_meta(self):
         def task():
             self._apply_env()
+            if self._check_analysis_cache():
+                if messagebox.askyesno("分析缓存",
+                    "已存在分析结果 (Data_source.txt)。\n\n是 = 跳过  否 = 重新分析"):
+                    self.log("  ⚡ 使用分析缓存，跳过重分析")
+                    self._mark_step(3, "done")
+                    return
             from danmu_method.get_data_by_danmu import DanmakuAnalyzer
             analyzer = DanmakuAnalyzer()
             analyzer.run()
@@ -1947,32 +2483,33 @@ class AppLauncher(TkinterDnD.Tk):
         def task():
             self._apply_env()
             target = self.input_dir_var.get().strip()
-            import Auto_clip
-            Auto_clip.CONFIG["input_dir"] = target
-            Auto_clip.CONFIG["output_dir"] = self.output_dir_var.get().strip()
-            # 封面配置
-            cover_style = self._cover_style_var.get().strip()
-            if cover_style:
-                if "cover" not in Auto_clip.CONFIG:
-                    Auto_clip.CONFIG["cover"] = {}
-                Auto_clip.CONFIG["cover"]["active_style"] = cover_style
-                try:
-                    Auto_clip.CONFIG["cover"]["count"] = int(self._cover_count_var.get().strip() or "5")
-                except ValueError:
-                    pass
-            # 确保 data_source 指向正确路径
             ds_path = os.path.join(target, "Data_source.txt")
-            if not os.path.exists(ds_path):
-                ds_path = "Data_source.txt"
-            if not os.path.exists(ds_path):
+            if not os.path.exists(ds_path) and not os.path.exists("Data_source.txt"):
                 self.log("  无 Data_source.txt，自动生成默认切片条目...")
                 self._generate_default_data_source()
                 ds_path = os.path.join(target, "Data_source.txt")
-            Auto_clip.CONFIG["data_source"] = ds_path
+            Auto_clip = self._setup_auto_clip_config()
             Auto_clip.main()
             self._mark_step(4, "done")
 
         self._run_worker("自动切片", task)
+
+    def _find_srt_for_check(self):
+        """查找当前视频对应的 SRT 文件（必须同名匹配）"""
+        srt = self._get_selected_srt()
+        if srt and srt.exists():
+            return srt
+        video = self._get_selected_video()
+        if not video:
+            return None
+        target = self.input_dir_var.get().strip()
+        for pattern in ["*.srt", "*/*.srt"]:
+            for f in Path(target).glob(pattern):
+                if "__no_danmaku__" in str(f):
+                    continue
+                if f.stem == video.stem:
+                    return f
+        return None
 
     def _check_srt_exists(self):
         """检查输入目录下是否有 SRT 字幕文件"""
@@ -2089,9 +2626,8 @@ class AppLauncher(TkinterDnD.Tk):
     @staticmethod
     def _parse_srt_time(time_str):
         """解析 SRT 时间戳为秒数"""
-        time_str = time_str.replace(",", ".")
-        h, m, s = time_str.split(":")
-        return int(h) * 3600 + int(m) * 60 + float(s)
+        from core.subtitle_utils import SubtitleUtils
+        return SubtitleUtils.parse_srt_time(time_str)
 
     def _generate_default_data_source(self):
         """无 Data_source.txt 时，基于 SRT 时间范围自动切片（每3分钟一段）"""
@@ -2126,10 +2662,8 @@ class AppLauncher(TkinterDnD.Tk):
 
     @staticmethod
     def _format_seconds(seconds):
-        h = int(seconds // 3600)
-        m = int((seconds % 3600) // 60)
-        s = int(seconds % 60)
-        return f"{h:02d}:{m:02d}:{s:02d}"
+        from core.subtitle_utils import SubtitleUtils
+        return SubtitleUtils.sec_to_srt_time(seconds)
 
     def run_all(self):
         def task():
@@ -2182,7 +2716,9 @@ class AppLauncher(TkinterDnD.Tk):
                         self._mark_step(num, "run")
                         if num == 1:
                             self._step1_func()
-                            # 下载完成后刷新文件状态（弹幕/字幕路径可能已变化）
+                            self._apply_env()
+                            # 下载/生成完成后自动按成员归类，归类后刷新环境变量
+                            self._auto_organize_for_analysis()
                             self._apply_env()
                         elif num == 2:
                             from utils.ASRCorrector import FileBasedCorrector
@@ -2191,35 +2727,33 @@ class AppLauncher(TkinterDnD.Tk):
                             FileBasedCorrector().process_folder(target)
                             # LLM 智能纠错改为手动触发（高级配置按钮），自动流程太慢
                         elif num == 3:
+                            # 缓存检查：Data_source.txt 比 SRT 新则跳过重分析
+                            if self._check_analysis_cache() and self._auto_mode.get():
+                                self.log("  ⚡ 检测到有效分析缓存，自动跳过（全自动模式）")
+                                self._step_done[3] = True
+                                self._mark_step(3, "done")
+                                continue
+                            if self._check_analysis_cache():
+                                if messagebox.askyesno("分析缓存",
+                                    "已存在分析结果 (Data_source.txt)。\n\n"
+                                    "是 = 跳过，直接使用缓存\n"
+                                    "否 = 重新分析（覆盖旧结果）"):
+                                    self.log("  ⚡ 使用分析缓存，跳过重分析")
+                                    self._step_done[3] = True
+                                    self._mark_step(3, "done")
+                                    continue
                             from danmu_method.get_data_by_danmu import DanmakuAnalyzer
                             analyzer = DanmakuAnalyzer()
                             analyzer.run()
                             self._step_done[3] = True
                             if self._pause_var.get():
-                                self.log("  ⏸ 分析后暂停模式 — 请校核切片数据后再手动点击第4步")
-                                self.log("  提示: 点击「编辑切片数据」修改标题/封面文字")
+                                self.log("  ⏸ 分析后暂停 — 即将打开高光校核器...")
                                 self._mark_step(3, "done")
+                                self.after(200, self._edit_highlight_review)
                                 return  # 暂停，不继续第4步
                         elif num == 4:
+                            self._setup_auto_clip_config()
                             import Auto_clip
-                            target = self.input_dir_var.get().strip()
-                            Auto_clip.CONFIG["input_dir"] = target
-                            Auto_clip.CONFIG["output_dir"] = self.output_dir_var.get().strip()
-                            # 封面配置
-                            cover_style = self._cover_style_var.get().strip()
-                            if cover_style:
-                                if "cover" not in Auto_clip.CONFIG:
-                                    Auto_clip.CONFIG["cover"] = {}
-                                Auto_clip.CONFIG["cover"]["active_style"] = cover_style
-                                try:
-                                    Auto_clip.CONFIG["cover"]["count"] = int(self._cover_count_var.get().strip() or "5")
-                                except ValueError:
-                                    pass
-                            # 确保 data_source 指向正确路径
-                            ds_path = os.path.join(target, "Data_source.txt")
-                            if not os.path.exists(ds_path):
-                                ds_path = "Data_source.txt"
-                            Auto_clip.CONFIG["data_source"] = ds_path
                             Auto_clip.main()
                         self._mark_step(num, "done")
                         self._step_done[num] = True

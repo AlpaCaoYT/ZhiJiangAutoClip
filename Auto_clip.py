@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from core.auto_detect import auto_detect_files
+from core.file_utils import resolve_input_dir
 from core.metadata import load_source_meta, write_source_meta
 from core.video_processor import VideoProcessor
 
@@ -17,36 +18,6 @@ def _env_path(name, default_path):
     return os.environ.get(name, str(default_path))
 
 
-def _contains_media_files(folder_path):
-    folder = Path(folder_path)
-    if not folder.exists() or not folder.is_dir():
-        return False
-
-    video_exts = {".mp4", ".flv", ".mkv", ".mov", ".ts"}
-    has_video = any(child.is_file() and child.suffix.lower() in video_exts for child in folder.iterdir())
-    has_srt = any(child.is_file() and child.suffix.lower() == ".srt" for child in folder.iterdir())
-    return has_video and has_srt
-
-
-def _resolve_input_dir(input_dir):
-    candidate = Path(input_dir)
-    if not candidate.exists():
-        return str(candidate)
-
-    if candidate.is_file():
-        return str(candidate.parent)
-
-    if _contains_media_files(candidate):
-        return str(candidate)
-
-    session_dirs = [path for path in candidate.iterdir() if path.is_dir() and _contains_media_files(path)]
-    if not session_dirs:
-        return str(candidate)
-
-    session_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-    selected_dir = session_dirs[0]
-    print(f"📁 检测到输入根目录，自动选择最近的素材目录: {selected_dir.name}")
-    return str(selected_dir)
 
 # ==========================================
 # 1. 用户配置区域
@@ -159,56 +130,9 @@ CONFIG = {
         "shadow_depth": 2,         # 阴影深度  (推荐为2)
         "margin_v": 50,            # 字幕和画面底部的距离（推荐为50）
 
-        # 字幕样式：
-        # 黄字黑色描边（通用）
+        # 黄字黑色描边（通用默认），成员专属样式见 SubtitleUtils.MEMBER_STYLES
         "primary_color": "&H0000E1FF",
         "outline_color": "&H00000000",
-
-        # 白字黑色描边（通用）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00000000",
-
-        # 嘉然专属（粉色 #FF69B4）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00B469FF",
-
-        # "primary_color": "&H00B469FF",
-        # "outline_color": "&H00FFFFFF",
-
-        # 贝拉专属（紫色 #9B59B6）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00B6599B",
-
-        # "primary_color": "&H00B6599B",
-        # "outline_color": "&H00FFFFFF",
-
-        # 乃琳专属（蓝色 #3498DB）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00DB9834",
-
-        # "primary_color": "&H00DB9834",
-        # "outline_color": "&H00FFFFFF",
-
-        # A-SOUL团体（深蓝 #006AFF）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00FF6A00",
-
-        # "primary_color": "&H00FF6A00",
-        # "outline_color": "&H00FFFFFF",
-
-        # 心宜专属（深粉 #FF1493）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H009314FF",
-
-        # "primary_color": "&H009314FF",
-        # "outline_color": "&H00FFFFFF",
-
-        # 思诺专属（淡紫 #EEA0D7）
-        # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00D7A0EE",
-
-        # "primary_color": "&H00D7A0EE",
-        # "outline_color": "&H00FFFFFF",
     },
 }
 
@@ -248,7 +172,7 @@ def run_single_clip(
     if srt_file is not None:
         CONFIG['srt_file'] = srt_file
     if input_dir:
-        CONFIG['input_dir'] = _resolve_input_dir(input_dir)
+        CONFIG['input_dir'] = resolve_input_dir(input_dir, require_srt=True)
 
     if not CONFIG.get('source_video'):
         if output_dir:
@@ -281,12 +205,19 @@ def run_single_clip(
 
 def main():
     # 1. 检测文件（字幕纠错已由 app_launcher 步骤完成，此处不再重复）
-    input_dir = _resolve_input_dir(CONFIG['input_dir'])
-    CONFIG['input_dir'] = input_dir
-    video_file, srt_file = auto_detect_files(input_dir)
-
-    CONFIG['source_video'] = video_file
-    CONFIG['srt_file'] = srt_file
+    # 优先使用 GUI 已选中的视频/字幕，避免在多文件目录中自动检测失败
+    if CONFIG.get('source_video') and os.path.exists(CONFIG['source_video']):
+        video_file = CONFIG['source_video']
+        srt_file = CONFIG.get('srt_file', '')
+        if srt_file and not os.path.exists(srt_file):
+            srt_file = ''
+        print(f"使用已选定视频: {Path(video_file).name}")
+    else:
+        input_dir = resolve_input_dir(CONFIG['input_dir'], require_srt=True)
+        CONFIG['input_dir'] = input_dir
+        video_file, srt_file = auto_detect_files(input_dir)
+        CONFIG['source_video'] = video_file
+        CONFIG['srt_file'] = srt_file
 
     # ================= 自动更新输出路径 =================
     # 镜像输入目录的子文件夹结构（如 心宜/6月26日xxx/ → clip_output/心宜/6月26日xxx/）

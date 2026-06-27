@@ -100,24 +100,26 @@ class SubtitleUtils:
             result.append(clean_text[i : i + max_len])
         return '\n'.join(result)
 
+    def _resolution(self):
+        s = self.config['subtitle']
+        if s.get('orientation', 'horizontal') == 'vertical':
+            return 1080, 1920
+        return 1920, 1080
+
+    def _make_style(self, name, primary, outline):
+        s = self.config['subtitle']
+        return (
+            f"Style: {name},{s['font_family']},{s['font_size']},"
+            f"{primary},{primary},{outline},-1,"
+            f"-1,0,0,0,100,100,0,0,1,{s['outline_width']},{s['shadow_depth']},2,10,10,{s['margin_v']},1"
+        )
+
     def reformat_ass_file(self, file_path, max_len):
         if not os.path.exists(file_path):
             return
 
+        current_res_x, current_res_y = self._resolution()
         s = self.config['subtitle']
-        if s.get('orientation', 'horizontal') == 'vertical':
-            current_res_x = 1080
-            current_res_y = 1920
-        else:
-            current_res_x = 1920
-            current_res_y = 1080
-
-        def _make_style(name, primary, outline):
-            return (
-                f"Style: {name},{s['font_family']},{s['font_size']},"
-                f"{primary},{primary},{outline},-1,"
-                f"-1,0,0,0,100,100,0,0,1,{s['outline_width']},{s['shadow_depth']},2,10,10,{s['margin_v']},1\n"
-            )
 
         with open(file_path, 'r', encoding='utf-8-sig') as f:
             lines = f.readlines()
@@ -131,9 +133,9 @@ class SubtitleUtils:
                 new_lines.append(f"PlayResY: {current_res_y}\n")
             elif line.startswith('Style:') and not style_written:
                 style_written = True
-                new_lines.append(_make_style("Default", s['primary_color'], s['outline_color']))
+                new_lines.append(self._make_style("Default", s['primary_color'], s['outline_color']) + "\n")
                 for m_name, m_primary, m_outline in SubtitleUtils.MEMBER_STYLES:
-                    new_lines.append(_make_style(m_name, m_primary, m_outline))
+                    new_lines.append(self._make_style(m_name, m_primary, m_outline) + "\n")
             elif line.startswith('Style:'):
                 continue
             elif line.startswith('Dialogue:'):
@@ -153,25 +155,11 @@ class SubtitleUtils:
             f.writelines(new_lines)
 
     def create_ass_file(self, subtitles, output_path, start_offset, end_offset, max_char_len):
-        s = self.config['subtitle']
+        play_res_x, play_res_y = self._resolution()
 
-        if s.get('orientation', 'horizontal') == 'vertical':
-            play_res_x = 1080
-            play_res_y = 1920
-        else:
-            play_res_x = 1920
-            play_res_y = 1080
-
-        def _make_style(name, primary, outline):
-            return (
-                f"Style: {name},{s['font_family']},{s['font_size']},"
-                f"{primary},{primary},{outline},-1,"
-                f"-1,0,0,0,100,100,0,0,1,{s['outline_width']},{s['shadow_depth']},2,10,10,{s['margin_v']},1"
-            )
-
-        style_lines = [_make_style("Default", s['primary_color'], s['outline_color'])]
+        style_lines = [self._make_style("Default", self.config['subtitle']['primary_color'], self.config['subtitle']['outline_color'])]
         for m_name, m_primary, m_outline in SubtitleUtils.MEMBER_STYLES:
-            style_lines.append(_make_style(m_name, m_primary, m_outline))
+            style_lines.append(self._make_style(m_name, m_primary, m_outline))
 
         header = f"""[Script Info]
 Title: Auto Clip
@@ -201,8 +189,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 raw_text = sub['text']
                 style = "Default"
                 # 检测 [发言人] 标签，应用成员专属样式
-                import re as _re
-                speaker_match = _re.match(r'\[(嘉然|贝拉|乃琳|心宜|思诺)\]\s*', raw_text)
+                speaker_match = re.match(r'\[(嘉然|贝拉|乃琳|心宜|思诺)\]\s*', raw_text)
                 if speaker_match:
                     style = speaker_match.group(1)
                     raw_text = raw_text[speaker_match.end():]

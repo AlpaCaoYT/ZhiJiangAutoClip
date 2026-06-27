@@ -22,10 +22,8 @@ env/
 
 # 工作区素材和输出
 workspace/
-切片输出/
 素材/
 切片输出/
-__no_danmaku__/
 models/
 crash_*.log
 

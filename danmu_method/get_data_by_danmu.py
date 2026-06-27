@@ -149,7 +149,6 @@ class DanmakuAnalyzer:
         folder = Path(folder_path)
         if not folder.exists() or not folder.is_dir():
             return False
-
         has_ass = any(child.is_file() and child.suffix.lower() == '.ass' for child in folder.iterdir())
         has_srt = any(child.is_file() and child.suffix.lower() == '.srt' for child in folder.iterdir())
         return has_ass and has_srt
@@ -158,21 +157,18 @@ class DanmakuAnalyzer:
         candidate = Path(input_dir)
         if not candidate.exists():
             return str(candidate)
-
         if candidate.is_file():
             return str(candidate.parent)
-
         if self._contains_media_files(candidate):
             return str(candidate)
-
-        session_dirs = [path for path in candidate.iterdir() if path.is_dir() and self._contains_media_files(path)]
+        session_dirs = [p for p in candidate.iterdir()
+                        if p.is_dir() and self._contains_media_files(p)]
         if not session_dirs:
             return str(candidate)
-
-        session_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-        selected_dir = session_dirs[0]
-        print(f"📁 检测到输入根目录，自动选择最近的素材目录: {selected_dir.name}")
-        return str(selected_dir)
+        session_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        selected = session_dirs[0]
+        print(f"\U0001f4c1 检测到输入根目录，自动选择最近的素材目录: {selected.name}")
+        return str(selected)
 
     def _auto_detect_files(self):
         """检测 ASS 和 SRT 文件（优先使用环境变量指定的文件）"""
@@ -223,7 +219,7 @@ class DanmakuAnalyzer:
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
         except Exception:
             return 0
-    
+
     def parse_srt_time(self, time_str):
         try:
             time_str = time_str.replace(',', '.')
@@ -233,7 +229,7 @@ class DanmakuAnalyzer:
             return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
         except Exception:
             return 0
-    
+
     def load_danmaku(self):
         if not os.path.exists(self.ass_file):
             print(f"错误: 找不到文件 {self.ass_file}")
