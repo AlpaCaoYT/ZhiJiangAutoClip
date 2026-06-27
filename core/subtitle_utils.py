@@ -8,8 +8,8 @@ class SubtitleUtils:
         ("嘉然",   "&H00FFFFFF", "&H00B469FF"),  # 粉色 #FF69B4
         ("贝拉",   "&H00FFFFFF", "&H00B6599B"),  # 紫色 #9B59B6
         ("乃琳",   "&H00FFFFFF", "&H00DB9834"),  # 蓝色 #3498DB
-        ("心宜",   "&H00FFFFFF", "&H0000D7FF"),  # 金色 #FFD700
-        ("思诺",   "&H00FFFFFF", "&H00C0C0C0"),  # 银色 #C0C0C0
+        ("心宜",   "&H00FFFFFF", "&H009314FF"),  # 深粉 #FF1493
+        ("思诺",   "&H00FFFFFF", "&H00D7A0EE"),  # 淡紫 #EEA0D7
         ("ASOUL",  "&H00FFFFFF", "&H00FF6A00"),  # 深蓝 #006AFF
     ]
 

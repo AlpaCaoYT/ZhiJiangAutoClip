@@ -91,18 +91,18 @@ def write_regen_script(script_path, clip_data, config):
         # "primary_color": "&H00FF6A00",
         # "outline_color": "&H00FFFFFF",
 
-        # 心宜专属（金色 #FFD700）
+        # 心宜专属（深粉 #FF1493）
         # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H0000D7FF",
+        # "outline_color": "&H009314FF",
 
-        # "primary_color": "&H0000D7FF",
+        # "primary_color": "&H009314FF",
         # "outline_color": "&H00FFFFFF",
 
-        # 思诺专属（银色 #C0C0C0）
+        # 思诺专属（淡紫 #EEA0D7）
         # "primary_color": "&H00FFFFFF",
-        # "outline_color": "&H00C0C0C0",
+        # "outline_color": "&H00D7A0EE",
 
-        # "primary_color": "&H00C0C0C0",
+        # "primary_color": "&H00D7A0EE",
         # "outline_color": "&H00FFFFFF"
     },
 

@@ -1288,7 +1288,7 @@ class AppLauncher(TkinterDnD.Tk):
         # 成员颜色
         colors = {
             "嘉然": "#FF69B4", "贝拉": "#9B59B6", "乃琳": "#3498DB",
-            "心宜": "#FFD700", "思诺": "#C0C0C0", "未指定": "#888",
+            "心宜": "#FF1493", "思诺": "#EEA0D7", "未指定": "#888",
         }
 
         win = tk.Toplevel(self)
